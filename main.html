@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>사내자산관리솔루션</title>
+    <link rel="stylesheet" href="css/main.css" />
+</head>
+
+<body>
+    <!-- 전체 페이지 래퍼: 세로(상/중/하) 3분할 -->
+    <div id="app">
+        <!-- 상단: 프로그램 제목 및 로그인 정보 영역 (현재 타이틀만 표시) -->
+        <header class="section header">
+            <h1 class="title">사내자산관리솔루션</h1>
+        </header>
+
+        <!-- 중간: 전체 프로그램 메뉴 영역 (자리만 확보) -->
+        <nav class="section middle" aria-label="전체 프로그램 메뉴">
+            <!-- 추후 메뉴가 들어갈 영역 -->
+        </nav>
+
+        <!-- 하단: 전체 프로그램이 동작할 영역 (자리만 확보) -->
+        <main class="section bottom" role="main">
+            <!-- 추후 메인 컨텐츠가 들어갈 영역 -->
+            <div class="workspace">
+                <!-- 왼쪽: 메뉴 패널 (아이콘 2열 그리드, overflow 스크롤) -->
+                <aside class="menu-panel" aria-label="아이콘 메뉴">
+                    <div class="menu-header">
+                        <select id="iconGroup" name="iconGroup" class="menu-select">
+                            <option value="" selected disabled>그룹 선택</option>
+                            <!-- TODO: 추후 실제 그룹 목록을 동적으로 채움 -->
+                        </select>
+                    </div>
+                    <div id="menuGrid" class="menu-grid">
+                        <!-- main.js에서 menu01.svg ~ menu10.svg 자동 삽입 -->
+                    </div>
+                </aside>
+
+                <!-- 오른쪽: 실제 작업/콘텐츠 영역 -->
+                <section class="content-panel" aria-label="작업 영역">
+                    <div class="content-split">
+                        <!-- 상단 바: 좌(레이어 정보) / 우(레이어 선택, +버튼) -->
+                        <div class="panel-top" role="region" aria-label="레이어 상단 바">
+                            <!-- 좌측: 선택된 레이어 정보 -->
+                            <div class="layer-info">
+                                <div id="layerTitle" class="layer-title">선택된 레이어 없음</div>
+                                <div id="layerDesc" class="layer-desc">우측 상단에서 레이어를 선택하세요.</div>
+                            </div>
+
+                            <!-- 우측: 레이어 선택 -->
+                            <select id="layerSelect" class="layer-select" aria-label="레이어 선택">
+                                <option value="" selected disabled>레이어 선택</option>
+                                <!-- JS에서 옵션 채움 -->
+                            </select>
+
+                            <!-- 우측 끝: + 아이콘 버튼 (동작은 추후 구현) -->
+                            <button id="addLayerBtn" class="icon-btn" type="button" aria-label="레이어 추가" title="레이어 추가">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" fill="none"
+                                        stroke-linecap="round" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- 하단: 실제 작업 공간(placeholder) -->
+                        <div class="panel-bottom" role="region" aria-label="레이어 작업 공간">
+                            <!-- 추후: 선택된 레이어 상세/그리드 등 구성 -->
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+        integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <script src="js/main.js"></script>
+</body>
+
+</html>
