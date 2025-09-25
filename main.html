@@ -54,6 +54,18 @@
                                 <option value="" selected disabled>레이어 선택</option>
                                 <!-- JS에서 옵션 채움 -->
                             </select>
+                            <!-- 클램프/스냅/그리드 컨트롤 -->
+                            <div class="ctrl-group" role="group" aria-label="이동 옵션">
+                                <label for="clampMode" class="sr-only">클램프 모드</label>
+                                <select id="clampMode" class="ctrl-select">
+                                    <option value="soft" selected>소프트 클램프</option>
+                                    <option value="hard">하드 클램프</option>
+                                    <option value="none">클램프 없음</option>
+                                </select>
+
+                                <label class="ctrl-check"><input type="checkbox" id="snapToggle"> 스냅</label>
+                                <label class="ctrl-check"><input type="checkbox" id="gridToggle"> 그리드이동</label>
+                            </div>
 
                             <!-- 우측 끝: + 아이콘 버튼 (동작은 추후 구현) -->
                             <button id="addLayerBtn" class="icon-btn" type="button" aria-label="레이어 추가" title="레이어 추가">
@@ -64,9 +76,10 @@
                             </button>
                         </div>
 
-                        <!-- 하단: 실제 작업 공간(placeholder) -->
+                        <!-- 여기(패널 하단)만 교체합니다 -->
                         <div class="panel-bottom" role="region" aria-label="레이어 작업 공간">
-                            <!-- 추후: 선택된 레이어 상세/그리드 등 구성 -->
+                            <!-- 드롭을 받을 캔버스 -->
+                            <div id="canvas" class="draw-canvas" tabindex="0" aria-label="캔버스 작업 영역"></div>
                         </div>
                     </div>
                 </section>
