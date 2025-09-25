@@ -283,9 +283,11 @@ body {
 }
 
 /* 선택 시 아이콘 모양 윤곽선 표시 */
+/*
 .canvas-item .selection-overlay {
   pointer-events: none;
 }
+*/
 
 /* 핸들(모양만, 동작 미구현) — SVG 내부에 rect로 그립니다 */
 .canvas-item .selection-handle {
@@ -310,7 +312,7 @@ body {
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
   opacity: 0.95;
-  pointer-events: none;
+  pointer-events: none;   /* 내부는 이동용: 이벤트 통과 */
 }
 
 /* SVG 경계에서 stroke가 잘리는 현상 방지 */
@@ -352,3 +354,73 @@ body.no-select, body.no-select * { user-select: none !important; }
   .panel-top { gap: 8px; }
 }
 
+/* 리사이즈 핸들 커서 */
+.selection-handle { cursor: pointer; }
+.selection-handle[data-handle="nw"],
+.selection-handle[data-handle="se"] { cursor: nwse-resize; }
+.selection-handle[data-handle="ne"],
+.selection-handle[data-handle="sw"] { cursor: nesw-resize; }
+.selection-handle[data-handle="n"],
+.selection-handle[data-handle="s"] { cursor: ns-resize; }
+.selection-handle[data-handle="w"],
+.selection-handle[data-handle="e"] { cursor: ew-resize; }
+
+/* 스케일 애니메이션 최적화 */
+.canvas-item { will-change: transform; }
+
+/* 코너/중점 핸들 */
+.selection-handle { cursor: pointer; }
+.selection-handle[data-handle="nw"],
+.selection-handle[data-handle="se"] { cursor: nwse-resize; }
+.selection-handle[data-handle="ne"],
+.selection-handle[data-handle="sw"] { cursor: nesw-resize; }
+.selection-handle[data-handle="n"],
+.selection-handle[data-handle="s"] { cursor: ns-resize; }
+.selection-handle[data-handle="w"],
+.selection-handle[data-handle="e"] { cursor: ew-resize; }
+
+/* 가장자리 전체를 덮는 보이지 않는 엣지 핸들(히트존 확장) */
+.edge-handle {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;       /* 엣지에서 이벤트 받기 */
+}
+.edge-handle[data-handle="n"],
+.edge-handle[data-handle="s"] { cursor: ns-resize; }
+.edge-handle[data-handle="w"],
+.edge-handle[data-handle="e"] { cursor: ew-resize; }
+
+/* 코너용 ‘보이지 않는 넓은’ 히트존 */
+.corner-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+
+/* 코너/엣지/작은 핸들 모두 이벤트 가능하게 */
+.selection-handle,
+.edge-handle { pointer-events: all; }
+
+/* 커서 지정 */
+.selection-handle[data-handle="nw"],
+.selection-handle[data-handle="se"],
+.corner-hit[data-handle="nw"],
+.corner-hit[data-handle="se"] { cursor: nwse-resize; }
+
+.selection-handle[data-handle="ne"],
+.selection-handle[data-handle="sw"],
+.corner-hit[data-handle="ne"],
+.corner-hit[data-handle="sw"] { cursor: nesw-resize; }
+
+.selection-handle[data-handle="n"],
+.selection-handle[data-handle="s"],
+.edge-handle[data-handle="n"],
+.edge-handle[data-handle="s"] { cursor: ns-resize; }
+
+.selection-handle[data-handle="w"],
+.selection-handle[data-handle="e"],
+.edge-handle[data-handle="w"],
+.edge-handle[data-handle="e"] { cursor: ew-resize; }
+
+/* 사각 테두리 자체는 히트 없음(이동/커서 방해 X) */
+.selection-overlay .selection-rect { pointer-events: none; }

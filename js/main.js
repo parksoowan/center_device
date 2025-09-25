@@ -10,13 +10,21 @@ $(document).ready(function () {
     var GRID_MOVE_DEFAULT = false;  // 초기 그리드이동 체크 여부
     var SVG_NS = 'http://www.w3.org/2000/svg';
 
-    // 그리드/스냅 설정 (배경 그리드 20px과 일치)
-    var GRID_SIZE = 20;
-    var SNAP_THRESHOLD = 6; // px, 그리드선과 이만큼 이내면 스냅
+    var MIN_SCALE = 0.3;  // 최소 배율
+    var MAX_SCALE = 5;    // 최대 배율
 
     function getClampMode() { return $('#clampMode').val() || 'soft'; }
     function isSnapEnabled() { return $('#snapToggle').is(':checked'); }
     function isGridMoveOn() { return $('#gridToggle').is(':checked'); }
+
+    function sign(v) { return v < 0 ? -1 : 1; }
+    /* 부호는 유지하고, 절대값만 [min,max]로 클램프 */
+    function clampSigned(v, min, max) {
+        var s = sign(v), a = Math.abs(v);
+        if (a < min) a = min;
+        if (a > max) a = max;
+        return s * a;
+    }
 
     // 메뉴 아이콘 초기화 (jQuery 사용)
     function initMenuIcons(count) {
@@ -100,7 +108,6 @@ $(document).ready(function () {
     function initMoveOptionDefaults() {
         $('#clampMode').val(CLAMP_DEFAULT);
         $('#snapToggle').prop('checked', SNAP_DEFAULT);
-        '#gridToggle'
         $('#gridToggle').prop('checked', GRID_MOVE_DEFAULT);
     }
 
@@ -259,6 +266,8 @@ $(document).ready(function () {
             // 캔버스에 추가
             $item.append($svg);
             $canvas.append($item);
+            $item.data('scaleX', 1);
+            $item.data('scaleY', 1);
 
             normalizeSvg($svg); // ← 아이콘을 64×64 + 여백으로 표준화
 
@@ -320,6 +329,8 @@ $(document).ready(function () {
         // 아이템 클릭(왼쪽 버튼) → 선택 + 드래그 시작
         $canvas.on('mousedown', '.canvas-item', function (e) {
             if (e.which !== 1) return; // 좌클릭만
+            if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit').length) return; // ← 핸들이면 이동 안 함
+
             $dragItem = $(this);
 
             // 선택 상태 보장 (드롭 즉시 선택 로직과 충돌 없음)
@@ -352,8 +363,12 @@ $(document).ready(function () {
 
             // 하드 클램프: 이동 중 즉시 경계 제한
             if (getClampMode() === 'hard') {
-                var maxL = $canvas.width() - $dragItem.outerWidth();
-                var maxT = $canvas.height() - $dragItem.outerHeight();
+                var sx = Math.abs($dragItem.data('scaleX') || 1);
+                var sy = Math.abs($dragItem.data('scaleY') || 1);
+                var itemW = ICON_SIZE * sx;
+                var itemH = ICON_SIZE * sy;
+                var maxL = $canvas.width() - itemW;
+                var maxT = $canvas.height() - itemH;
                 newLeft = Math.max(0, Math.min(newLeft, maxL));
                 newTop = Math.max(0, Math.min(newTop, maxT));
             }
@@ -378,8 +393,12 @@ $(document).ready(function () {
 
             // 소프트 클램프: 드롭 후 안쪽으로 스냅백 애니메이션
             if ($dragItem && getClampMode() === 'soft') {
-                var maxL = $canvas.width() - $dragItem.outerWidth();
-                var maxT = $canvas.height() - $dragItem.outerHeight();
+                var sx = Math.abs($dragItem.data('scaleX') || 1);
+                var sy = Math.abs($dragItem.data('scaleY') || 1);
+                var itemW = ICON_SIZE * sx;
+                var itemH = ICON_SIZE * sy;
+                var maxL = $canvas.width() - itemW;
+                var maxT = $canvas.height() - itemH;
                 var curL = parseFloat($dragItem.css('left')) || 0;
                 var curT = parseFloat($dragItem.css('top')) || 0;
 
@@ -408,6 +427,113 @@ $(document).ready(function () {
         // 네이티브 드래그 이미지 방지
         $canvas.on('dragstart', '.canvas-item, .canvas-item *', function (e) {
             e.preventDefault();
+        });
+    }
+
+    /** 리사이즈 핸들 드래그로 크기 조정 (중앙 기준 균등 스케일) */
+    function bindResizeHandles() {
+        var $doc = $(document);
+        var $canvas = $('#canvas');
+        if ($canvas.length === 0) return;
+
+        var resizing = false;
+        var $item = null;
+        var mode = 'uniform';     // 'uniform' | 'x' | 'y'
+        var startScaleX = 1, startScaleY = 1;
+        var centerX = 0, centerY = 0;
+        var r0 = 1, ax0 = 1, ay0 = 1;     // 기준 반경/축거리
+        var sgnX0 = 1, sgnY0 = 1;         // 기준 부호(반전 판정)
+
+        // 코너/중점 핸들 + 엣지에서 리사이즈 시작
+        $canvas.on('mousedown', '.selection-handle, .edge-handle, .corner-hit', function (e) {
+            if (e.which !== 1) return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            $item = $(this).closest('.canvas-item');
+            if ($item.length === 0) return;
+
+            // 선택 보장
+            if (!$item.hasClass('is-selected')) {
+                clearSelection();
+                $item.addClass('is-selected');
+                applySelectionOverlay($item);
+            }
+
+            // 핸들 종류에 따라 모드 결정
+            var h = $(this).attr('data-handle') || '';
+            if (h === 'n' || h === 's') mode = 'y';
+            else if (h === 'w' || h === 'e') mode = 'x';
+            else mode = 'uniform'; // nw/ne/sw/se
+
+            // 시작 배율
+            startScaleX = $item.data('scaleX') || 1;
+            startScaleY = $item.data('scaleY') || 1;
+
+            // 중심 좌표(페이지)
+            var off = $item.offset();
+            var w = ICON_SIZE * Math.abs(startScaleX);
+            var hgt = ICON_SIZE * Math.abs(startScaleY);
+            centerX = off.left + w / 2;
+            centerY = off.top + hgt / 2;
+
+            var dx0 = e.clientX - centerX;
+            var dy0 = e.clientY - centerY;
+
+            // 기준값/부호 (반전 판정용)
+            r0 = Math.max(10, Math.hypot(dx0, dy0));
+            ax0 = Math.max(10, Math.abs(dx0));
+            ay0 = Math.max(10, Math.abs(dy0));
+            sgnX0 = sign(dx0);
+            sgnY0 = sign(dy0);
+
+            resizing = true;
+            $('body').addClass('no-select');
+        });
+
+        // 드래그 중
+        $doc.on('mousemove.resize', function (e) {
+            if (!resizing || !$item) return;
+
+            var dx = e.clientX - centerX;
+            var dy = e.clientY - centerY;
+
+            var sx = startScaleX;
+            var sy = startScaleY;
+
+            if (mode === 'uniform') {
+                var r1 = Math.max(10, Math.hypot(dx, dy));
+                var ratio = r1 / r0;
+                var flipX = (dx === 0) ? 1 : (sign(dx) === sgnX0 ? 1 : -1);
+                var flipY = (dy === 0) ? 1 : (sign(dy) === sgnY0 ? 1 : -1);
+                sx = clampSigned(startScaleX * ratio * flipX, MIN_SCALE, MAX_SCALE);
+                sy = clampSigned(startScaleY * ratio * flipY, MIN_SCALE, MAX_SCALE);
+            } else if (mode === 'x') {
+                var ax1 = Math.max(10, Math.abs(dx));
+                var rx = ax1 / ax0;
+                var flipX = (dx === 0) ? 1 : (sign(dx) === sgnX0 ? 1 : -1);
+                sx = clampSigned(startScaleX * rx * flipX, MIN_SCALE, MAX_SCALE);
+                sy = startScaleY;
+            } else if (mode === 'y') {
+                var ay1 = Math.max(10, Math.abs(dy));
+                var ry = ay1 / ay0;
+                var flipY = (dy === 0) ? 1 : (sign(dy) === sgnY0 ? 1 : -1);
+                sy = clampSigned(startScaleY * ry * flipY, MIN_SCALE, MAX_SCALE);
+                sx = startScaleX;
+            }
+
+            // 적용
+            $item.css('transform', 'scale(' + sx + ',' + sy + ')');
+            $item.data('scaleX', sx);
+            $item.data('scaleY', sy);
+        });
+
+        // 리사이즈 종료
+        $doc.on('mouseup.resize', function () {
+            if (!resizing) return;
+            resizing = false;
+            $('body').removeClass('no-select');
+            $item = null;
         });
     }
 
@@ -441,6 +567,62 @@ $(document).ready(function () {
         rect.setAttribute('class', 'selection-rect');
         overlay.appendChild(rect);
 
+        var EH = 12; // edge hit thickness
+        var edges = [
+            { x: x, y: y, w: w, h: EH, tag: 'n' }, // 상
+            { x: x + w - EH, y: y, w: EH, h: h, tag: 'e' }, // 우
+            { x: x, y: y + h - EH, w: w, h: EH, tag: 's' }, // 하
+            { x: x, y: y, w: EH, h: h, tag: 'w' }  // 좌
+        ];
+        for (var ei = 0; ei < edges.length; ei++) {
+            var eh = document.createElementNS(svgns, 'rect');
+            eh.setAttribute('x', edges[ei].x);
+            eh.setAttribute('y', edges[ei].y);
+            eh.setAttribute('width', edges[ei].w);
+            eh.setAttribute('height', edges[ei].h);
+            eh.setAttribute('class', 'edge-handle');
+            eh.setAttribute('data-handle', edges[ei].tag);
+            overlay.appendChild(eh);
+        }
+
+        var CH = 18; // corner hit size (px, SVG 좌표계)
+        var corners = [
+            { cx: x, cy: y, tag: 'nw' },
+            { cx: x + w, cy: y, tag: 'ne' },
+            { cx: x, cy: y + h, tag: 'sw' },
+            { cx: x + w, cy: y + h, tag: 'se' }
+        ];
+        for (var ci = 0; ci < corners.length; ci++) {
+            var ch = document.createElementNS(svgns, 'rect');
+            ch.setAttribute('x', corners[ci].cx - CH / 2);
+            ch.setAttribute('y', corners[ci].cy - CH / 2);
+            ch.setAttribute('width', CH);
+            ch.setAttribute('height', CH);
+            ch.setAttribute('class', 'corner-hit');
+            ch.setAttribute('data-handle', corners[ci].tag);
+            overlay.appendChild(ch);
+        }
+
+        // 8개 핸들(모양만, 동작 미구현 → 이번 단계에서 드래그로 크기조정)
+        var pts = [
+            [x, y], [x + w / 2, y], [x + w, y],
+            [x, y + h / 2], [x + w, y + h / 2],
+            [x, y + h], [x + w / 2, y + h], [x + w, y + h]
+        ];
+        var tags = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
+
+        for (var i = 0; i < pts.length; i++) {
+            var r = document.createElementNS(svgns, 'rect');
+            var size = 8;
+            r.setAttribute('x', pts[i][0] - size / 2);
+            r.setAttribute('y', pts[i][1] - size / 2);
+            r.setAttribute('width', size);
+            r.setAttribute('height', size);
+            r.setAttribute('class', 'selection-handle');
+            r.setAttribute('data-handle', tags[i]); // ← 커서/동작용 태그
+            overlay.appendChild(r);
+        }
+        /*
         // 8개 핸들(모양만, 동작 미구현)
         var pts = [
             [x, y], [x + w / 2, y], [x + w, y],
@@ -457,7 +639,7 @@ $(document).ready(function () {
             r.setAttribute('class', 'selection-handle');
             overlay.appendChild(r);
         }
-
+        */
         svgEl.appendChild(overlay);
     }
 
@@ -480,7 +662,8 @@ $(document).ready(function () {
 
         bindCanvasItemMove();
         // 이동 옵션 UI에 상단 상수 기본값 반영
-        initMoveOptionDefaults();   
+        initMoveOptionDefaults();
+        bindResizeHandles(); // ← 리사이즈 핸들 활성화
     }
     appInit();
 });
