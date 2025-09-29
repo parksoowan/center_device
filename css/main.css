@@ -424,3 +424,23 @@ body.no-select, body.no-select * { user-select: none !important; }
 
 /* 사각 테두리 자체는 히트 없음(이동/커서 방해 X) */
 .selection-overlay .selection-rect { pointer-events: none; }
+
+/* 회전 핸들 연결선(보이기만, 클릭 X) */
+.selection-rotate-line {
+  stroke: #0ea5e9;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* 회전 핸들(원) */
+.selection-rotate-handle {
+  fill: #ffffff;
+  stroke: #0ea5e9;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+  pointer-events: all;
+}
+.canvas-item.is-rotating .selection-rotate-handle { cursor: grabbing; }

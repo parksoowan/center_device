@@ -26,6 +26,15 @@ $(document).ready(function () {
         return s * a;
     }
 
+    /* scaleX/scaleY/rotation을 한 번에 적용 */
+    function applyTransform($item) {
+        var sx = $item.data('scaleX') || 1;
+        var sy = $item.data('scaleY') || 1;
+        var rot = $item.data('rotation') || 0; // deg
+        $item.css('transform', 'rotate(' + rot + 'deg) scale(' + sx + ',' + sy + ')');
+    }
+
+
     // 메뉴 아이콘 초기화 (jQuery 사용)
     function initMenuIcons(count) {
         try {
@@ -329,7 +338,7 @@ $(document).ready(function () {
         // 아이템 클릭(왼쪽 버튼) → 선택 + 드래그 시작
         $canvas.on('mousedown', '.canvas-item', function (e) {
             if (e.which !== 1) return; // 좌클릭만
-            if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit').length) return; // ← 핸들이면 이동 안 함
+            if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit, .selection-rotate-handle').length) return; // ← 핸들이면 이동 안 함
 
             $dragItem = $(this);
 
@@ -522,16 +531,91 @@ $(document).ready(function () {
                 sx = startScaleX;
             }
 
+            /*
             // 적용
             $item.css('transform', 'scale(' + sx + ',' + sy + ')');
             $item.data('scaleX', sx);
             $item.data('scaleY', sy);
+            */
+            $item.data('scaleX', sx);
+            $item.data('scaleY', sy);
+            applyTransform($item);
         });
 
         // 리사이즈 종료
         $doc.on('mouseup.resize', function () {
             if (!resizing) return;
             resizing = false;
+            $('body').removeClass('no-select');
+            $item = null;
+        });
+    }
+
+    /* 회전 핸들 드래그로 회전 */
+    function bindRotateHandle() {
+        var $doc = $(document);
+        var $canvas = $('#canvas');
+        if ($canvas.length === 0) return;
+
+        var rotating = false;
+        var $item = null;
+        var startRot = 0;
+        var centerX = 0, centerY = 0;
+        var startAng = 0;
+
+        // 시작
+        $canvas.on('mousedown', '.selection-rotate-handle', function (e) {
+            if (e.which !== 1) return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            $item = $(this).closest('.canvas-item');
+            if ($item.length === 0) return;
+
+            // 선택 보장
+            if (!$item.hasClass('is-selected')) {
+                clearSelection();
+                $item.addClass('is-selected');
+                applySelectionOverlay($item);
+            }
+
+            // 중심 좌표(페이지)
+            var off = $item.offset();
+            var sx = Math.abs($item.data('scaleX') || 1);
+            var sy = Math.abs($item.data('scaleY') || 1);
+            var w = ICON_SIZE * sx;
+            var h = ICON_SIZE * sy;
+            centerX = off.left + w / 2;
+            centerY = off.top + h / 2;
+
+            startRot = $item.data('rotation') || 0;
+            startAng = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+
+            rotating = true;
+            $item.addClass('is-rotating');
+            $('body').addClass('no-select');
+        });
+
+        // 진행
+        $doc.on('mousemove.rotate', function (e) {
+            if (!rotating || !$item) return;
+
+            var ang = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+            var deltaDeg = (ang - startAng) * 180 / Math.PI;
+            var newRot = startRot + deltaDeg;
+
+            // Shift: 15도 스냅
+            if (e.shiftKey) newRot = Math.round(newRot / 15) * 15;
+
+            $item.data('rotation', newRot);
+            applyTransform($item);
+        });
+
+        // 종료
+        $doc.on('mouseup.rotate', function () {
+            if (!rotating) return;
+            rotating = false;
+            if ($item) $item.removeClass('is-rotating');
             $('body').removeClass('no-select');
             $item = null;
         });
@@ -584,6 +668,30 @@ $(document).ready(function () {
             eh.setAttribute('data-handle', edges[ei].tag);
             overlay.appendChild(eh);
         }
+
+        // 회전 핸들(상단 중앙에서 위로 살짝 떨어진 곳)
+        var RH_R = 7;    // 회전 핸들 반지름
+        var RH_GAP = 18; // 상단 테두리에서 위로 띄울 거리
+        var cx = x + w / 2;
+        var cy = y - RH_GAP;
+
+        // 연결선
+        var rLine = document.createElementNS(svgns, 'line');
+        rLine.setAttribute('x1', cx);
+        rLine.setAttribute('y1', y);
+        rLine.setAttribute('x2', cx);
+        rLine.setAttribute('y2', cy);
+        rLine.setAttribute('class', 'selection-rotate-line');
+        overlay.appendChild(rLine);
+
+        // 원형 핸들
+        var rHandle = document.createElementNS(svgns, 'circle');
+        rHandle.setAttribute('cx', cx);
+        rHandle.setAttribute('cy', cy);
+        rHandle.setAttribute('r', RH_R);
+        rHandle.setAttribute('class', 'selection-rotate-handle');
+        rHandle.setAttribute('data-handle', 'rotate');
+        overlay.appendChild(rHandle);
 
         var CH = 18; // corner hit size (px, SVG 좌표계)
         var corners = [
@@ -664,6 +772,7 @@ $(document).ready(function () {
         // 이동 옵션 UI에 상단 상수 기본값 반영
         initMoveOptionDefaults();
         bindResizeHandles(); // ← 리사이즈 핸들 활성화
+        bindRotateHandle();
     }
     appInit();
 });
