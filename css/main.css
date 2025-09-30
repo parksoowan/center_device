@@ -264,7 +264,7 @@ body {
                     linear-gradient(90deg, #f3f4f6 1px, transparent 1px);
   background-size: 20px 20px, 20px 20px;
   background-position: 0 0, 0 0;
-  overflow: hidden;         /* 패닝/줌 단계 전에, 우선 숨김 */
+  overflow: auto;         /* 패닝/줌 단계 전에, 우선 숨김 */
 }
 
 /* 캔버스 위에 올라가는 아이템 컨테이너 */
@@ -283,11 +283,9 @@ body {
 }
 
 /* 선택 시 아이콘 모양 윤곽선 표시 */
-/*
 .canvas-item .selection-overlay {
   pointer-events: none;
 }
-*/
 
 /* 핸들(모양만, 동작 미구현) — SVG 내부에 rect로 그립니다 */
 .canvas-item .selection-handle {
@@ -399,6 +397,7 @@ body.no-select, body.no-select * { user-select: none !important; }
 
 /* 코너/엣지/작은 핸들 모두 이벤트 가능하게 */
 .selection-handle,
+.corner-hit,
 .edge-handle { pointer-events: all; }
 
 /* 커서 지정 */
@@ -444,3 +443,61 @@ body.no-select, body.no-select * { user-select: none !important; }
   pointer-events: all;
 }
 .canvas-item.is-rotating .selection-rotate-handle { cursor: grabbing; }
+
+#worldSize { position: relative; width: 100%; height: 100%; }
+#world {
+  position: absolute; left: 0; top: 0;
+  transform-origin: 0 0; /* 좌상단 기준 확대/축소 대비 */
+}
+
+/* 패닝 모드 시 시각적 커서 */
+#canvas.canvas-pan-ready { cursor: grab; }
+#canvas.canvas-is-panning { cursor: grabbing; }
+
+#canvas.canvas-pan-ready,
+#canvas.canvas-is-panning {
+  user-select: none;
+  -webkit-user-select: none; /* Safari 보강 */
+}
+
+.panel-bottom { position: relative; } /* 미니맵 오버레이 기준 */
+
+.minimap{
+  position: absolute;
+  left: 12px; bottom: 12px;
+  width: 220px; height: 140px;     /* canvas의 width/height와 맞추기 */
+  border: 1px solid #d1d5db;
+  background: rgba(255,255,255,.9);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+  z-index: 10;
+  cursor: crosshair;
+}
+.minimap canvas{ width:100%; height:100%; display:block; }
+
+/* 미니맵 기본 박스(선택) */
+#minimapDock, #minimap {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  width: 220px;
+  height: 140px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+
+/* === 줌 컨트롤 === */
+.zoom-group { display: inline-flex; align-items: center; gap: 8px; }
+.zoom-btn {
+  width: 44px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; cursor: pointer;
+  font-size: 13px; color: #374151;
+}
+.zoom-btn:hover { background: #f9fafb; }
+.zoom-btn:active { transform: translateY(1px); }
+.zoom-label { min-width: 54px; text-align: center; font-size: 14px; color: #374151; }
+

@@ -13,6 +13,23 @@ $(document).ready(function () {
     var MIN_SCALE = 0.3;  // 최소 배율
     var MAX_SCALE = 5;    // 최대 배율
 
+    // 월드(작업면) 크기와 줌
+    var WORLD_W = 4000;   // 필요시 조절
+    var WORLD_H = 3000;
+    var zoom = 1;
+
+    function getZoom() { return zoom; }
+    function clampZoom(z) { return Math.max(MIN_SCALE, Math.min(MAX_SCALE, z)); }
+    function updateZoomLabel() { $('#zoomLabel').text(Math.round(zoom * 100) + '%'); }
+
+    function setWorldView(z) {
+        zoom = clampZoom(z);
+        $('#world').css('transform', 'scale(' + zoom + ')');
+        $('#worldSize').css({ width: WORLD_W * zoom, height: WORLD_H * zoom });
+        updateZoomLabel();
+        if (window._minimap) window._minimap.draw();
+    }
+
     function getClampMode() { return $('#clampMode').val() || 'soft'; }
     function isSnapEnabled() { return $('#snapToggle').is(':checked'); }
     function isGridMoveOn() { return $('#gridToggle').is(':checked'); }
@@ -148,9 +165,15 @@ $(document).ready(function () {
             var src = e.originalEvent.dataTransfer.getData('text/plain');
             if (!src) return;
 
-            var offset = $canvas.offset();
-            var x = e.originalEvent.clientX - offset.left;
-            var y = e.originalEvent.clientY - offset.top;
+            var target = e.currentTarget;        // ← 실제 드롭된 그 캔버스
+            var rect = target.getBoundingClientRect();
+            var $t = $(target);
+            var z = getZoom();
+
+            var cx = e.originalEvent.clientX - rect.left;
+            var cy = e.originalEvent.clientY - rect.top;
+            var x = (cx + $t.scrollLeft()) / z;
+            var y = (cy + $t.scrollTop()) / z;
 
             addIconToCanvas(src, x, y);
         });
@@ -274,7 +297,8 @@ $(document).ready(function () {
 
             // 캔버스에 추가
             $item.append($svg);
-            $canvas.append($item);
+            // $canvas.append($item);
+            $('#world').append($item);
             $item.data('scaleX', 1);
             $item.data('scaleY', 1);
 
@@ -290,6 +314,8 @@ $(document).ready(function () {
             $item.addClass('is-selected');
             applySelectionOverlay($item);
 
+            // [minimap] 아이템 추가 후 미니맵 갱신
+            if (window._minimap) window._minimap.draw();
             /*
             // 클릭 시 선택 처리
             $item.on('mousedown', function (e) {
@@ -331,12 +357,16 @@ $(document).ready(function () {
 
         // 빈 공간 클릭 시 선택 해제
         $canvas.on('mousedown', function (e) {
-            if ($(e.target).closest('.canvas-item').length) return; // 아이템이면 패스
+            if (e.which === 2) return; // ← 중클릭은 패닝
+            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return;
+            if ($(e.target).closest('.canvas-item').length) return;
             clearSelection();
         });
 
         // 아이템 클릭(왼쪽 버튼) → 선택 + 드래그 시작
         $canvas.on('mousedown', '.canvas-item', function (e) {
+            if (e.which === 2) return;
+            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가
             if (e.which !== 1) return; // 좌클릭만
             if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit, .selection-rotate-handle').length) return; // ← 핸들이면 이동 안 함
 
@@ -367,8 +397,9 @@ $(document).ready(function () {
             if (!dragging || !$dragItem) return;
             var dx = e.clientX - startX;
             var dy = e.clientY - startY;
-            var newLeft = startLeft + dx;
-            var newTop = startTop + dy;
+            var z = getZoom();
+            var newLeft = startLeft + dx / z;
+            var newTop = startTop + dy / z;
 
             // 하드 클램프: 이동 중 즉시 경계 제한
             if (getClampMode() === 'hard') {
@@ -376,8 +407,8 @@ $(document).ready(function () {
                 var sy = Math.abs($dragItem.data('scaleY') || 1);
                 var itemW = ICON_SIZE * sx;
                 var itemH = ICON_SIZE * sy;
-                var maxL = $canvas.width() - itemW;
-                var maxT = $canvas.height() - itemH;
+                var maxL = WORLD_W - itemW;   // ← $canvas.width() 대신 WORLD_W
+                var maxT = WORLD_H - itemH;   // ← $canvas.height() 대신 WORLD_H
                 newLeft = Math.max(0, Math.min(newLeft, maxL));
                 newTop = Math.max(0, Math.min(newTop, maxT));
             }
@@ -406,8 +437,9 @@ $(document).ready(function () {
                 var sy = Math.abs($dragItem.data('scaleY') || 1);
                 var itemW = ICON_SIZE * sx;
                 var itemH = ICON_SIZE * sy;
-                var maxL = $canvas.width() - itemW;
-                var maxT = $canvas.height() - itemH;
+                var maxL = WORLD_W - itemW;
+                var maxT = WORLD_H - itemH;
+
                 var curL = parseFloat($dragItem.css('left')) || 0;
                 var curT = parseFloat($dragItem.css('top')) || 0;
 
@@ -425,7 +457,14 @@ $(document).ready(function () {
                     if (Math.abs(sT - targetT) <= SNAP_THRESHOLD) targetT = sT;
                 }
 
-                $dragItem.stop(true).animate({ left: targetL, top: targetT }, 120);
+                $dragItem.stop(true).animate({ left: targetL, top: targetT }, 120)
+                    .promise()
+                    .done(function () {
+                        if (window._minimap) window._minimap.draw();
+                    });
+            } else {
+                // [minimap] 즉시 갱신
+                if (window._minimap) window._minimap.draw();
             }
             dragging = false;
             if ($dragItem) { $dragItem.removeClass('is-dragging'); }
@@ -455,6 +494,8 @@ $(document).ready(function () {
 
         // 코너/중점 핸들 + 엣지에서 리사이즈 시작
         $canvas.on('mousedown', '.selection-handle, .edge-handle, .corner-hit', function (e) {
+            if (e.which === 2) return; // ← 중클릭은 패닝으로 넘김
+            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가(중요: stopPropagation 전에)
             if (e.which !== 1) return;
             e.stopPropagation();
             e.preventDefault();
@@ -548,6 +589,9 @@ $(document).ready(function () {
             resizing = false;
             $('body').removeClass('no-select');
             $item = null;
+
+            // [minimap] 리사이즈 종료 후 갱신
+            if (window._minimap) window._minimap.draw();
         });
     }
 
@@ -565,6 +609,8 @@ $(document).ready(function () {
 
         // 시작
         $canvas.on('mousedown', '.selection-rotate-handle', function (e) {
+            if (e.which === 2) return; // ← 중클릭은 패닝으로 넘김
+            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가
             if (e.which !== 1) return;
             e.stopPropagation();
             e.preventDefault();
@@ -618,6 +664,9 @@ $(document).ready(function () {
             if ($item) $item.removeClass('is-rotating');
             $('body').removeClass('no-select');
             $item = null;
+
+            // [minimap] 회전 종료 후 갱신
+            if (window._minimap) window._minimap.draw();
         });
     }
 
@@ -751,12 +800,330 @@ $(document).ready(function () {
         svgEl.appendChild(overlay);
     }
 
+    function bindCanvasPan() {
+        var $win = $(window);
+        var $canvas = $('#canvas');
+        if ($canvas.length === 0) return;
+
+        var spaceDown = false;
+        var panning = false;
+        var startX = 0, startY = 0;
+        var startSL = 0, startST = 0;
+        var $panTarget = null;
+
+        function isSpaceKey(e) {
+            return e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.which === 32 || e.keyCode === 32;
+        }
+
+        // 스페이스 다운: 항상 preventDefault (자동반복 포함)
+        $win.on('keydown.canvasPan', function (e) {
+            if (!isSpaceKey(e)) return;
+
+            if (!spaceDown) {
+                spaceDown = true;
+                $canvas.addClass('canvas-pan-ready');
+                // 드래그 시작 전에도 선택 방지 (레이아웃 전체)
+                $('body').addClass('no-select');
+            }
+            // 자동반복으로 들어오는 keydown 모두에서 기본동작(스크롤) 차단
+            e.preventDefault();
+        });
+
+        // 스페이스 업: 버튼 활성화/스크롤 기본동작도 차단
+        $win.on('keyup.canvasPan', function (e) {
+            if (!isSpaceKey(e)) return;
+
+            spaceDown = false;
+            $canvas.removeClass('canvas-pan-ready');
+
+            // 패닝 중이 아니면 선택 차단 해제
+            if (!panning) $('body').removeClass('no-select');
+
+            // 스페이스가 포커스된 버튼/셀렉트를 클릭 처리하지 않도록
+            e.preventDefault();
+        });
+
+        $win.on('blur.canvasPan', function () {
+            spaceDown = false;
+            $canvas.removeClass('canvas-pan-ready');
+            if (!panning) $('body').removeClass('no-select');
+        });
+
+        // 중클릭 자동스크롤(브라우저 기본) 완전 차단
+        $canvas.on('auxclick.canvasPan', function (e) {
+            if (e.button === 1 || e.which === 2) e.preventDefault();
+        }).on('click.canvasPan', function (e) {
+            if (e.button === 1 || e.which === 2) e.preventDefault();
+        });
+
+        // 팬 시작: Space + 좌클릭 또는 중클릭
+        $canvas.on('mousedown.canvasPan', function (e) {
+            var isMiddle = (e.which === 2);
+            if (!(spaceDown || isMiddle)) return;
+
+            panning = true;
+            $panTarget = $(e.currentTarget); // 실제 스크롤 대상
+            startX = e.clientX;
+            startY = e.clientY;
+            startSL = $panTarget.scrollLeft();
+            startST = $panTarget.scrollTop();
+
+            // 포커스를 캔버스로 (스페이스 입력 안전)
+            this.focus && this.focus();
+
+            $canvas.addClass('canvas-is-panning');
+            $('body').addClass('no-select');
+
+            // 다른 mousedown 핸들러/선택 시작 막기
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        // 이동
+        $(document).on('mousemove.canvasPan', function (e) {
+            if (!panning || !$panTarget) return;
+            var dx = e.clientX - startX;
+            var dy = e.clientY - startY;
+            $panTarget.scrollLeft(startSL - dx);
+            $panTarget.scrollTop(startST - dy);
+        });
+
+        // 종료
+        $(document).on('mouseup.canvasPan', function () {
+            if (!panning) return;
+            panning = false;
+            $panTarget = null;
+            $canvas.removeClass('canvas-is-panning');
+            // 스페이스가 여전히 눌려있지 않으면 선택차단 해제
+            if (!spaceDown) $('body').removeClass('no-select');
+        });
+    }
 
     /** 선택 오버레이 제거 */
     function removeSelectionOverlay($item) {
         var $svg = $item.find('svg').first();
         if ($svg.length === 0) return;
         $svg.find('g.selection-overlay').remove();
+    }
+
+    function initMinimap() {
+        var $mini = $('#miniCanvas');
+        var $canvas = $('#canvas');
+        if ($mini.length === 0) return;
+
+        var MINI_W = $mini[0].width;   // 220
+        var MINI_H = $mini[0].height;  // 160
+        var ctx = $mini[0].getContext('2d');
+
+        function getRatioAndOffset() {
+            // 월드 크기 기준(현 버전: WORLD_W/H 사용)
+            var r = Math.min(MINI_W / WORLD_W, MINI_H / WORLD_H);
+            var offX = (MINI_W - WORLD_W * r) / 2;
+            var offY = (MINI_H - WORLD_H * r) / 2;
+            return { r, offX, offY };
+        }
+
+        function drawMinimap() {
+            var { r, offX, offY } = getRatioAndOffset();
+            ctx.clearRect(0, 0, MINI_W, MINI_H);
+
+            // 1) 월드 테두리
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(offX, offY, WORLD_W * r, WORLD_H * r);
+
+            // 2) 아이콘들(대략 bbox로 표시)
+            $('#world .canvas-item').each(function () {
+                var $it = $(this);
+                var left = parseFloat($it.css('left')) || 0;
+                var top = parseFloat($it.css('top')) || 0;
+                var sx = Math.abs($it.data('scaleX') || 1);
+                var sy = Math.abs($it.data('scaleY') || 1);
+                var rot = ($it.data('rotation') || 0) * Math.PI / 180;
+
+                var iw = ICON_SIZE * sx, ih = ICON_SIZE * sy;
+                // 회전된 bbox 근사(작은 화면에서 충분히 OK)
+                var bw = Math.abs(iw * Math.cos(rot)) + Math.abs(ih * Math.sin(rot));
+                var bh = Math.abs(iw * Math.sin(rot)) + Math.abs(ih * Math.cos(rot));
+
+                var x = offX + left * r;
+                var y = offY + top * r;
+
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillRect(x, y, Math.max(2, bw * r), Math.max(2, bh * r));
+            });
+
+            // 3) 뷰포트 표시(메인 캔버스에서 보이는 영역)
+            var z = getZoom();
+            var vx = ($canvas.scrollLeft() / z) * r + offX;
+            var vy = ($canvas.scrollTop() / z) * r + offY;
+            var vw = ($canvas.innerWidth() / z) * r;
+            var vh = ($canvas.innerHeight() / z) * r;
+
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(vx, vy, vw, vh);
+            ctx.fillStyle = 'rgba(14,165,233,0.12)';
+            ctx.fillRect(vx, vy, vw, vh);
+        }
+
+        // 미니맵 클릭/드래그 → 메인 캔버스 패닝
+        var draggingMini = false;
+        function moveViewportByMini(e) {
+            var rect = $mini[0].getBoundingClientRect();
+            var mx = e.clientX - rect.left;
+            var my = e.clientY - rect.top;
+
+            var { r, offX, offY } = getRatioAndOffset();
+            // 미니맵 좌표 → 월드 좌표
+            var wx = (mx - offX) / r;
+            var wy = (my - offY) / r;
+            wx = Math.max(0, Math.min(WORLD_W, wx));
+            wy = Math.max(0, Math.min(WORLD_H, wy));
+
+            var z = getZoom();
+            var targetSL = wx * z - $canvas.innerWidth() / 2;
+            var targetST = wy * z - $canvas.innerHeight() / 2;
+
+            $canvas.scrollLeft(targetSL);
+            $canvas.scrollTop(targetST);
+            drawMinimap();
+        }
+
+        $mini.on('mousedown', function (e) { draggingMini = true; moveViewportByMini(e); });
+        $(document).on('mousemove', function (e) { if (draggingMini) moveViewportByMini(e); });
+        $(document).on('mouseup', function () { draggingMini = false; });
+
+        // 상태 변화에 반응(스크롤/윈도우리사이즈/아이콘 이동/줌 등)
+        $canvas.on('scroll', drawMinimap);
+        $(window).on('resize', drawMinimap);
+
+        // 공개 핸들(다른 로직에서 부르면 즉시 갱신)
+        window._minimap = { draw: drawMinimap };
+
+        drawMinimap(); // 최초 1회
+    }
+
+    function bindMinimapToggle() {
+        var $chk = $('#minimapToggle');
+        if ($chk.length === 0) return;
+
+        // 미니맵 컨테이너를 모두 포괄해서 찾음 (#miniWrap, #minimap, #minimapDock, .minimap)
+        var $mini = $('#miniWrap, #minimap, #minimapDock, .minimap');
+
+        // 컨테이너가 하나도 없으면 체크박스 비활성화 처리
+        if ($mini.length === 0) {
+            $chk.prop('disabled', true).closest('label').css('opacity', 0.5);
+            return;
+        }
+
+        // 초기 상태 반영
+        var initOn = $chk.is(':checked');
+        $mini.toggle(initOn).attr('aria-hidden', !initOn);
+        if (initOn && window._minimap && typeof window._minimap.draw === 'function') {
+            window._minimap.draw();
+        }
+
+        // 변경 시 토글
+        $chk.off('change.minimap').on('change.minimap', function () {
+            var on = $(this).is(':checked');
+            $mini.toggle(on).attr('aria-hidden', !on);
+            if (on && window._minimap && typeof window._minimap.draw === 'function') {
+                window._minimap.draw();
+            }
+        });
+    }
+
+    /* === 줌 유틸 === */
+    function zoomAtPoint(newZ, clientX, clientY) {
+        var $canvas = $('#canvas');
+        var rect = $canvas[0].getBoundingClientRect();
+        var cx = clientX - rect.left;
+        var cy = clientY - rect.top;
+
+        var sl = $canvas.scrollLeft();
+        var st = $canvas.scrollTop();
+
+        // 마우스 아래의 월드 좌표
+        var worldX = (sl + cx) / zoom;
+        var worldY = (st + cy) / zoom;
+
+        setWorldView(newZ);
+
+        // 같은 월드 좌표가 화면에서 그대로 보이도록 스크롤 보정
+        $canvas.scrollLeft(worldX * zoom - cx);
+        $canvas.scrollTop(worldY * zoom - cy);
+    }
+
+    function zoomAtCenter(newZ) {
+        var $canvas = $('#canvas');
+        var rect = $canvas[0].getBoundingClientRect();
+        var cx = rect.width / 2;
+        var cy = rect.height / 2;
+
+        var sl = $canvas.scrollLeft();
+        var st = $canvas.scrollTop();
+
+        var worldX = (sl + cx) / zoom;
+        var worldY = (st + cy) / zoom;
+
+        setWorldView(newZ);
+
+        $canvas.scrollLeft(worldX * zoom - cx);
+        $canvas.scrollTop(worldY * zoom - cy);
+    }
+
+    function fitToView() {
+        var $canvas = $('#canvas');
+        var vw = $canvas.innerWidth();
+        var vh = $canvas.innerHeight();
+        var fitZ = clampZoom(Math.min(vw / WORLD_W, vh / WORLD_H));
+        setWorldView(fitZ);
+        $canvas.scrollLeft(0);
+        $canvas.scrollTop(0);
+    }
+
+    /* === 줌 바인딩 === */
+    function bindZoom() {
+        var $canvas = $('#canvas');
+
+        // 휠 줌: Ctrl/Command(⌘) 키가 눌린 경우만 확대/축소 (핀치줌도 ctrlKey=true로 들어옴)
+        var el = $canvas[0];
+        if (el) {
+            el.addEventListener('wheel', function (e) {
+                if (!e.ctrlKey && !e.metaKey) return;   // 일반 스크롤은 그대로 두기
+                e.preventDefault(); // 반드시 passive:false 컨텍스트여야 함
+
+                var factor = (e.deltaY < 0) ? 1.1 : (1 / 1.1);
+                var target = clampZoom(zoom * factor);
+                zoomAtPoint(target, e.clientX, e.clientY);
+            }, { passive: false });
+        }
+
+        // 버튼
+        $('#zoomInBtn').on('click', function () {
+            zoomAtCenter(clampZoom(zoom * 1.1));
+        });
+        $('#zoomOutBtn').on('click', function () {
+            zoomAtCenter(clampZoom(zoom / 1.1));
+        });
+        $('#zoomFitBtn').on('click', function () {
+            fitToView();
+        });
+
+        // 키보드 단축키: Ctrl/Cmd + =/-, Ctrl/Cmd + 0
+        $(window).on('keydown.zoom', function (e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+                e.preventDefault();
+                zoomAtCenter(clampZoom(zoom * 1.1));
+            } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+                e.preventDefault();
+                zoomAtCenter(clampZoom(zoom / 1.1));
+            } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+                e.preventDefault();
+                zoomAtCenter(1);
+            }
+        });
     }
 
 
@@ -773,6 +1140,11 @@ $(document).ready(function () {
         initMoveOptionDefaults();
         bindResizeHandles(); // ← 리사이즈 핸들 활성화
         bindRotateHandle();
+        setWorldView(1);
+        bindCanvasPan();
+        initMinimap();
+        bindMinimapToggle();
+        bindZoom();
     }
     appInit();
 });

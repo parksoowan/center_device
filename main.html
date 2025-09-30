@@ -65,7 +65,15 @@
 
                                 <label class="ctrl-check"><input type="checkbox" id="snapToggle"> 스냅</label>
                                 <label class="ctrl-check"><input type="checkbox" id="gridToggle"> 그리드이동</label>
+
+                                <label class="ctrl-check"><input type="checkbox" id="minimapToggle" checked> 미니맵</label>
+                                <div class="zoom-group" aria-label="줌 컨트롤">
+                                <button type="button" id="zoomOutBtn" class="zoom-btn" title="축소">축소</button>
+                                <span id="zoomLabel" class="zoom-label">100%</span>
+                                <button type="button" id="zoomInBtn" class="zoom-btn" title="확대">확대</button>
+                                <button type="button" id="zoomFitBtn" class="zoom-btn" title="맞춤">맞춤</button>
                             </div>
+                            </div>                          
 
                             <!-- 우측 끝: + 아이콘 버튼 (동작은 추후 구현) -->
                             <button id="addLayerBtn" class="icon-btn" type="button" aria-label="레이어 추가" title="레이어 추가">
@@ -74,12 +82,23 @@
                                         stroke-linecap="round" />
                                 </svg>
                             </button>
+
+                            
                         </div>
 
                         <!-- 여기(패널 하단)만 교체합니다 -->
                         <div class="panel-bottom" role="region" aria-label="레이어 작업 공간">
                             <!-- 드롭을 받을 캔버스 -->
-                            <div id="canvas" class="draw-canvas" tabindex="0" aria-label="캔버스 작업 영역"></div>
+                            <div id="canvas" class="draw-canvas" tabindex="0" aria-label="캔버스 작업 영역">
+                                <div id="worldSize">
+                                    <div id="world"></div>
+                                </div>
+                            </div>
+
+                            <!-- ⬇️ 미니맵 -->
+                            <div id="miniWrap" class="minimap">
+                                <canvas id="miniCanvas" width="220" height="160"></canvas>
+                            </div>
                         </div>
                     </div>
                 </section>
