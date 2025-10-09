@@ -10,16 +10,345 @@ $(document).ready(function () {
     var GRID_MOVE_DEFAULT = false;  // 초기 그리드이동 체크 여부
     var SVG_NS = 'http://www.w3.org/2000/svg';
 
-    var MIN_SCALE = 0.3;  // 최소 배율
-    var MAX_SCALE = 5;    // 최대 배율
+    // (A) 뷰 줌 한계
+    var ZOOM_MIN = 0.3;
+    var ZOOM_MAX = 5;
+
+    // (B) 아이템 스케일 한계 (사실상 무제한에 가깝게)
+    var SCALE_MIN = 0.01;
+    var SCALE_MAX = 1000;
 
     // 월드(작업면) 크기와 줌
     var WORLD_W = 4000;   // 필요시 조절
     var WORLD_H = 3000;
     var zoom = 1;
 
+    var _itemAnchors = {}; // itemId -> [{connId, end:'start'|'end'}]
+
+    // === 연결(폴리라인) 상태 ===
+    var connect = { active: false, points: [], fromItemId: null, previewItem: null, previewPolyline: null };
+
+
+    // === Quick Menu ===
+    var _qm = { anchor: null }; // 현재 대상 아이템
+
+    function startConnect($from) {
+        cancelConnect();
+        connect.active = true;
+        connect.points = [];
+        connect.fromItemId = $from.data('id');
+        var p0 = getItemCenter($from);
+        connect.points.push(p0);
+
+        // === 미리보기(점선 폴리라인) - SVG 네임스페이스로 작성 ===
+        var $item = $('<div class="canvas-item connection-item preview" data-type="connection"></div>')
+            .css({ left: 0, top: 0, 'z-index': 99999 });
+
+        // svg
+        var svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        svg.setAttribute('viewBox', '0 0 ' + WORLD_W + ' ' + WORLD_H);
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.style.width = WORLD_W + 'px';
+        svg.style.height = WORLD_H + 'px';
+
+        // g
+        var g = document.createElementNS(SVG_NS, 'g');
+        g.setAttribute('class', 'icon-root');
+
+        // polyline (점선 미리보기)
+        var pl = document.createElementNS(SVG_NS, 'polyline');
+        pl.setAttribute('class', 'connection-polyline');
+        pl.setAttribute('fill', 'none');
+        pl.setAttribute('stroke', '#0ea5e9');
+        pl.setAttribute('stroke-width', '2');
+        pl.setAttribute('stroke-dasharray', '6,6');
+        pl.setAttribute('vector-effect', 'non-scaling-stroke');
+        pl.setAttribute('points', p0.x + ',' + p0.y);
+
+        g.appendChild(pl);
+        svg.appendChild(g);
+        $item.append(svg);
+        $('#world').append($item);
+
+        connect.previewItem = $item;
+        connect.previewPolyline = pl; // ← DOM 노드(네임스페이스 OK)
+        $('#canvas').addClass('connect-mode');
+    }
+
+
+    function registerConnectionToItem(itemId, connId, end) {
+        _itemAnchors[itemId] = _itemAnchors[itemId] || [];
+        _itemAnchors[itemId].push({ connId, end });
+    }
+    function unregisterConnectionFromItem(itemId, connId, end) {
+        var arr = _itemAnchors[itemId]; if (!arr) return;
+        _itemAnchors[itemId] = arr.filter(a => !(a.connId === connId && a.end === end));
+    }
+    function updateAttachedConnectionsForItem($item) {
+        var id = $item.data('id');
+        var refs = _itemAnchors[id]; if (!refs || !refs.length) return;
+        var c = getItemCenter($item);
+        refs.forEach(ref => {
+            var $conn = $('.connection-item[data-id="' + ref.connId + '"]');
+            if (!$conn.length) return;
+            var data = $conn.data('conn'); if (!data) return;
+            if (ref.end === 'start') data.points[0] = { x: c.x, y: c.y };
+            else data.points[data.points.length - 1] = { x: c.x, y: c.y };
+            data.poly.setAttribute('points', data.points.map(p => p.x + ',' + p.y).join(' '));
+            if ($conn.hasClass('is-selected')) applySelectionOverlay($conn);
+        });
+        if (window._minimap) window._minimap.draw();
+    }
+
+    function updatePreviewTo(clientX, clientY) {
+        if (!connect.active || !connect.previewPolyline) return;
+        var p = clientToWorld(clientX, clientY);
+        var pts = connect.points.concat([p]).map(pt => pt.x + ',' + pt.y).join(' ');
+        connect.previewPolyline.setAttribute('points', pts);
+    }
+
+    function addVertexAt(clientX, clientY) {
+        if (!connect.active) return;
+        var p = clientToWorld(clientX, clientY);
+        connect.points.push(p);
+        updatePreviewTo(clientX, clientY);
+    }
+
+    function finishConnectToTarget($target) {
+        var attachStart = { type: 'item', id: connect.fromItemId };
+        var attachEnd = null;
+        var pts = connect.points.slice();
+
+        if ($target && $target.length) {
+            var tc = getItemCenter($target);
+            pts.push(tc);
+            attachEnd = { type: 'item', id: $target.data('id') };
+        }
+
+        if (connect.previewItem) connect.previewItem.remove();
+
+        var $conn = createConnection(pts, attachStart, attachEnd, { selectConnection: true });
+        applyStyleToItem($conn, getCurrentStyle()); // 현재 스타일 적용
+
+        // ★ 연결 완료 후: 시작/끝 아이템을 선택 상태로
+        clearSelection();
+        var $from = $('.canvas-item[data-id="' + connect.fromItemId + '"]');
+        if ($from.length) { $from.addClass('is-selected'); applySelectionOverlay($from); }
+        if ($target && $target.length) { $target.addClass('is-selected'); applySelectionOverlay($target); }
+
+        // ✅ 연결 모드 종료 (이거 빠져있어서 다음 클릭이 계속 '점 추가'로 들어감)
+        cancelConnect();
+    }
+
+    function cancelConnect() {
+        if (connect.previewItem) connect.previewItem.remove();
+        $('#canvas').removeClass('connect-mode');
+        $('body').removeClass('no-select');              // ← 안전망
+        $('.canvas-item').removeClass('is-rotating is-dragging'); // ← 안전망
+        connect = { active: false, points: [], fromItemId: null, previewItem: null, previewPolyline: null };
+    }
+
+    // 실제 연결 아이템 생성
+    function createConnection(points, attachStart, attachEnd, opts) {
+        opts = opts || {};
+        var id = 'conn_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+
+        var $item = $('<div>', {
+            class: 'canvas-item connection-item',
+            'data-id': id,
+            'data-type': 'connection'
+        }).css({ left: 0, top: 0 });
+
+        // svg (세계 좌표)
+        var svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        svg.setAttribute('viewBox', '0 0 ' + WORLD_W + ' ' + WORLD_H);
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.style.width = WORLD_W + 'px';
+        svg.style.height = WORLD_H + 'px';
+        svg.style.pointerEvents = 'none';              // ★ 빈 영역 클릭 투명화
+
+        var g = document.createElementNS(SVG_NS, 'g');
+        g.setAttribute('class', 'icon-root');
+
+        // polyline
+        var pl = document.createElementNS(SVG_NS, 'polyline');
+        pl.setAttribute('class', 'connection-polyline');
+        pl.setAttribute('fill', 'none');
+        pl.setAttribute('stroke', '#0ea5e9');
+        pl.setAttribute('stroke-width', '2');
+        pl.setAttribute('vector-effect', 'non-scaling-stroke');
+        pl.setAttribute('points', points.map(p => p.x + ',' + p.y).join(' '));
+        pl.setAttribute('pointer-events', 'stroke');   // ★ 선만 클릭 가능
+
+        g.appendChild(pl);
+        svg.appendChild(g);
+        $item.append(svg);
+        $('#world').append($item);
+
+        var data = {
+            points: points.slice(),
+            attachStart: attachStart || null,
+            attachEnd: attachEnd || null,
+            poly: pl
+        };
+        $item.data('conn', data);
+
+        if (attachStart && attachStart.type === 'item') registerConnectionToItem(attachStart.id, id, 'start');
+        if (attachEnd && attachEnd.type === 'item') registerConnectionToItem(attachEnd.id, id, 'end');
+
+        // clearSelection();
+        // $item.addClass('is-selected');
+        // applySelectionOverlay($item);
+        // ★ 기본값: 연결을 자동 선택하지 않음 (필요 시 opts.selectConnection=true)
+        if (opts.selectConnection) {
+            clearSelection();
+            $item.addClass('is-selected');
+            applySelectionOverlay($item);
+        }
+        // 스타일바 값 반영
+        applyConnectionStyle($item, getCurrentStyle());
+
+        if (window._minimap) window._minimap.draw();
+        return $item;
+    }
+
+    function pickTopNonConnectionItem(clientX, clientY) {
+        var list = document.elementsFromPoint
+            ? document.elementsFromPoint(clientX, clientY)
+            : [document.elementFromPoint(clientX, clientY)];
+        for (var i = 0; i < list.length; i++) {
+            var $it = $(list[i]).closest('.canvas-item');
+            if ($it.length && !$it.hasClass('preview') && $it.attr('data-type') !== 'connection') return $it;
+        }
+        return null;
+    }
+
+
+    function bindConnectMode() {
+        var $canvas = $('#canvas');
+
+        // 마우스 이동 → 미리보기 갱신
+        $canvas.on('mousemove.connect', function (e) {
+            if (connect.active) updatePreviewTo(e.clientX, e.clientY);
+        });
+
+        // ✅ 연결 모드에서 아이템을 직접 눌렀다면 거기서 즉시 종료
+        $canvas.on('mousedown.connectItem', '.canvas-item', function (e) {
+            if (!connect.active || e.which !== 1) return;
+            var $it = $(this);
+            if ($it.hasClass('preview')) return;
+            if ($it.attr('data-type') === 'connection') return; // 선은 제외
+            if ($it.data('id') === connect.fromItemId) { e.preventDefault(); e.stopPropagation(); return; }
+            finishConnectToTarget($it);
+            e.preventDefault(); e.stopPropagation();
+        });
+
+        // 좌클릭: 빈곳이면 꼭짓점 추가, 아이템이면 완료
+        $canvas.on('mousedown.connect', function (e) {
+            if (!connect.active || e.which !== 1) return;
+
+            // 화면 좌표로 실제 맨 위 요소를 직접 찍어서 찾기
+            var el = document.elementFromPoint(e.clientX, e.clientY);
+            var $hitItem = $(el).closest('.canvas-item');
+            // var $hitItem = pickTopNonConnectionItem(e.clientX, e.clientY);
+            var isValidTarget =
+                $hitItem.length &&
+                !$hitItem.hasClass('preview') &&          // 프리뷰 제외
+                $hitItem.attr('data-type') !== 'connection'; // 연결 아이템 제외
+
+            if (isValidTarget) {
+                if ($hitItem.data('id') !== connect.fromItemId) finishConnectToTarget($hitItem);
+            } else {
+                addVertexAt(e.clientX, e.clientY); // 빈곳이면 꼭짓점 추가
+            }
+            e.preventDefault(); e.stopPropagation();
+        });
+
+        // ESC 취소
+        $(window).on('keydown.connect', function (e) {
+            if (e.key === 'Escape' && connect.active) cancelConnect();
+        });
+
+        // 캔버스 빈곳 더블클릭 → 현재까지의 꼭짓점으로 연결 종료(attachEnd 없음)
+        $('#canvas').on('dblclick.connect', function (e) {
+            if (!connect.active) return;
+            // 마지막 지점(더블클릭 지점)도 꼭짓점으로 찍어주고 종료
+            addVertexAt(e.clientX, e.clientY);
+            finishConnectToTarget(null);
+            e.preventDefault();
+            e.stopPropagation();
+        });
+    }
+
+
+    function clientToWorld(clientX, clientY) {
+        var $canvas = $('#canvas');
+        var rect = $canvas[0].getBoundingClientRect();
+        var z = getZoom();
+        var cx = clientX - rect.left;
+        var cy = clientY - rect.top;
+        return {
+            x: ($canvas.scrollLeft() + cx) / z,
+            y: ($canvas.scrollTop() + cy) / z
+        };
+    }
+
+    function getItemCenter($it) {
+        var left = parseFloat($it.css('left')) || 0;
+        var top = parseFloat($it.css('top')) || 0;
+        var sx = Math.abs($it.data('scaleX') || 1);
+        var sy = Math.abs($it.data('scaleY') || 1);
+        var w = ICON_SIZE * sx, h = ICON_SIZE * sy;
+        return { x: left + w / 2, y: top + h / 2 };
+    }
+
+
+    function hideQuickMenu() {
+        var $m = $('#quickMenu');
+        $m.attr('aria-hidden', 'true');
+        _qm.anchor = null;
+    }
+
+    function positionQuickMenu($item) {
+        var $m = $('#quickMenu');
+        var cont = $('.panel-bottom')[0];
+        if (!$m.length || !cont) return;
+
+        // 기준 컨테이너 기준 좌표
+        var ir = $item[0].getBoundingClientRect();
+        var cr = cont.getBoundingClientRect();
+
+        // 기본 위치: 아이템 우측에 살짝
+        var x = (ir.right - cr.left) + 8;
+        var y = (ir.top - cr.top);
+
+        // 먼저 보이게 해서 크기 측정
+        $m.css({ left: x, top: y }).attr('aria-hidden', 'false');
+        var mw = $m.outerWidth();
+        var mh = $m.outerHeight();
+        var cw = cr.width;
+        var ch = cr.height;
+
+        // 우측 넘침 → 왼쪽으로 붙이기
+        if (x + mw > cw - 8) x = Math.max(8, (ir.left - cr.left) - mw - 8);
+        // 하단 넘침 → 위로 올리기
+        if (y + mh > ch - 8) y = Math.max(8, ch - mh - 8);
+
+        $m.css({ left: x, top: y });
+    }
+
+    function showQuickMenu($item) {
+        _qm.anchor = $item;
+        positionQuickMenu($item);
+    }
+
+
     function getZoom() { return zoom; }
-    function clampZoom(z) { return Math.max(MIN_SCALE, Math.min(MAX_SCALE, z)); }
+    function clampZoom(z) { return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); }
     function updateZoomLabel() { $('#zoomLabel').text(Math.round(zoom * 100) + '%'); }
 
     function setWorldView(z) {
@@ -27,6 +356,7 @@ $(document).ready(function () {
         $('#world').css('transform', 'scale(' + zoom + ')');
         $('#worldSize').css({ width: WORLD_W * zoom, height: WORLD_H * zoom });
         updateZoomLabel();
+        hideQuickMenu();
         if (window._minimap) window._minimap.draw();
     }
 
@@ -162,10 +492,10 @@ $(document).ready(function () {
 
         $canvas.on('drop', function (e) {
             e.preventDefault();
-            var src = e.originalEvent.dataTransfer.getData('text/plain');
-            if (!src) return;
+            var payload = e.originalEvent.dataTransfer.getData('text/plain');
+            if (!payload) return;
 
-            var target = e.currentTarget;        // ← 실제 드롭된 그 캔버스
+            var target = e.currentTarget;
             var rect = target.getBoundingClientRect();
             var $t = $(target);
             var z = getZoom();
@@ -175,7 +505,18 @@ $(document).ready(function () {
             var x = (cx + $t.scrollLeft()) / z;
             var y = (cy + $t.scrollTop()) / z;
 
-            addIconToCanvas(src, x, y);
+            if (payload.startsWith('shape:')) {
+                var shape = payload.slice(6);
+                if (shape === 'text') {
+                    var t = prompt('텍스트 입력', '');
+                    if (t == null || t.trim() === '') return; // 입력 취소/공백이면 생성 안 함
+                    addShapeToCanvas('text', x, y, { text: t.trim() });
+                } else {
+                    addShapeToCanvas(shape, x, y);
+                }
+            } else {
+                addIconToCanvas(payload, x, y);
+            }
         });
     }
 
@@ -356,38 +697,67 @@ $(document).ready(function () {
         var startX = 0, startY = 0, startLeft = 0, startTop = 0;
 
         // 빈 공간 클릭 시 선택 해제
-        $canvas.on('mousedown', function (e) {
-            if (e.which === 2) return; // ← 중클릭은 패닝
+        $canvas.off('mousedown.canvasClear').on('mousedown.canvasClear', function (e) {
+            // 연결 아이템의 빈 영역(스트로크 이외)을 클릭했다면 '빈 곳'으로 취급
+            if ($(e.target).closest('.connection-item').length &&
+                !$(e.target).closest('.connection-polyline').length) {
+                hideQuickMenu();
+                clearSelection();
+                return;
+            }
+            if (e.which === 2) return; // 중클릭은 패닝
             if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return;
-            if ($(e.target).closest('.canvas-item').length) return;
-            clearSelection();
+            if ($(e.target).closest('.canvas-item, #quickMenu').length) return; // 아이템이면 여기서 처리 안 함
+            hideQuickMenu();
+            clearSelection(); // 빈 공간 클릭 시 퀵메뉴 닫기
         });
 
         // 아이템 클릭(왼쪽 버튼) → 선택 + 드래그 시작
         $canvas.on('mousedown', '.canvas-item', function (e) {
             if (e.which === 2) return;
-            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가
-            if (e.which !== 1) return; // 좌클릭만
-            if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit, .selection-rotate-handle').length) return; // ← 핸들이면 이동 안 함
+            if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return;
+            if (e.which !== 1) return;
+            if ($(e.target).closest('.selection-handle, .edge-handle, .corner-hit, .selection-rotate-handle').length) return;
 
-            $dragItem = $(this);
+            // ⛔ 연결 모드일 땐 드래그 시작 금지(꼭짓점 추가가 우선)
+            if (connect && connect.active) { return; }
 
-            // 선택 상태 보장 (드롭 즉시 선택 로직과 충돌 없음)
+            // ⛔ 프리뷰 아이템은 무시
+            var $self = $(this);
+            if ($self.hasClass('preview')) { e.preventDefault(); e.stopPropagation(); return; }
+
+            // ⛔ 연결 아이템은 '선택만' 하고 드래그 이동 금지
+            if ($self.attr('data-type') === 'connection') {
+                if (!$(e.target).closest('.connection-polyline').length) {
+                    // 선이 아닌 빈 영역 → 아이템 취급하지 않음
+                    return;
+                }
+                if (!$self.hasClass('is-selected')) {
+                    clearSelection();
+                    $self.addClass('is-selected');
+                    applySelectionOverlay($self);
+                }
+                e.preventDefault(); e.stopPropagation();
+                return;
+            }
+
+            // ===== 여기서부터 일반 아이템 드래그 시작 =====
+            $dragItem = $self;
+
             if (!$dragItem.hasClass('is-selected')) {
                 clearSelection();
                 $dragItem.addClass('is-selected');
                 applySelectionOverlay($dragItem);
             }
 
-            // 드래그 시작 지점 기록
             dragging = true;
             startX = e.clientX;
             startY = e.clientY;
             startLeft = parseFloat($dragItem.css('left')) || 0;
             startTop = parseFloat($dragItem.css('top')) || 0;
+            $dragItem.data('_startL', startLeft).data('_startT', startTop);
             $dragItem.addClass('is-dragging');
 
-            // 텍스트 선택/네이티브 드래그 방지
             $('body').addClass('no-select');
             e.preventDefault();
         });
@@ -425,6 +795,10 @@ $(document).ready(function () {
             }
             // 필요시 경계 클램프 로직 추가 가능(현재는 자유 이동)
             $dragItem.css({ left: newLeft + 'px', top: newTop + 'px' });
+            // 이 아이템에 붙은 연결선 끝점도 갱신
+            if ($dragItem && $dragItem.attr('data-type') !== 'connection') {
+                updateAttachedConnectionsForItem($dragItem);
+            }
         });
 
         // 종료
@@ -466,10 +840,24 @@ $(document).ready(function () {
                 // [minimap] 즉시 갱신
                 if (window._minimap) window._minimap.draw();
             }
+
+            if ($dragItem) {
+                var sL = $dragItem.data('_startL') || 0;
+                var sT = $dragItem.data('_startT') || 0;
+                var cL = parseFloat($dragItem.css('left')) || 0;
+                var cT = parseFloat($dragItem.css('top')) || 0;
+                var moved = Math.abs(cL - sL) + Math.abs(cT - sT);
+                if (moved > 2) {
+                    $dragItem.data('justDragged', true);
+                    setTimeout(function () { $dragItem && $dragItem.removeData('justDragged'); }, 0); // 같은 제스처에서만 억제
+                }
+            }
             dragging = false;
             if ($dragItem) { $dragItem.removeClass('is-dragging'); }
             $('body').removeClass('no-select');
             $dragItem = null;
+
+            hideQuickMenu();
         });
 
         // 네이티브 드래그 이미지 방지
@@ -494,6 +882,10 @@ $(document).ready(function () {
 
         // 코너/중점 핸들 + 엣지에서 리사이즈 시작
         $canvas.on('mousedown', '.selection-handle, .edge-handle, .corner-hit', function (e) {
+            hideQuickMenu();
+
+            if (connect && connect.active) { e.preventDefault(); e.stopPropagation(); return; }
+
             if (e.which === 2) return; // ← 중클릭은 패닝으로 넘김
             if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가(중요: stopPropagation 전에)
             if (e.which !== 1) return;
@@ -556,19 +948,19 @@ $(document).ready(function () {
                 var ratio = r1 / r0;
                 var flipX = (dx === 0) ? 1 : (sign(dx) === sgnX0 ? 1 : -1);
                 var flipY = (dy === 0) ? 1 : (sign(dy) === sgnY0 ? 1 : -1);
-                sx = clampSigned(startScaleX * ratio * flipX, MIN_SCALE, MAX_SCALE);
-                sy = clampSigned(startScaleY * ratio * flipY, MIN_SCALE, MAX_SCALE);
+                sx = clampSigned(startScaleX * ratio * flipX, SCALE_MIN, SCALE_MAX);
+                sy = clampSigned(startScaleY * ratio * flipY, SCALE_MIN, SCALE_MAX);
             } else if (mode === 'x') {
                 var ax1 = Math.max(10, Math.abs(dx));
                 var rx = ax1 / ax0;
                 var flipX = (dx === 0) ? 1 : (sign(dx) === sgnX0 ? 1 : -1);
-                sx = clampSigned(startScaleX * rx * flipX, MIN_SCALE, MAX_SCALE);
+                sx = clampSigned(startScaleX * rx * flipX, SCALE_MIN, SCALE_MAX);
                 sy = startScaleY;
             } else if (mode === 'y') {
                 var ay1 = Math.max(10, Math.abs(dy));
                 var ry = ay1 / ay0;
                 var flipY = (dy === 0) ? 1 : (sign(dy) === sgnY0 ? 1 : -1);
-                sy = clampSigned(startScaleY * ry * flipY, MIN_SCALE, MAX_SCALE);
+                sy = clampSigned(startScaleY * ry * flipY, SCALE_MIN, SCALE_MAX);
                 sx = startScaleX;
             }
 
@@ -609,6 +1001,10 @@ $(document).ready(function () {
 
         // 시작
         $canvas.on('mousedown', '.selection-rotate-handle', function (e) {
+            hideQuickMenu();
+
+            if (connect && connect.active) { e.preventDefault(); e.stopPropagation(); return; }
+
             if (e.which === 2) return; // ← 중클릭은 패닝으로 넘김
             if ($('#canvas').hasClass('canvas-pan-ready') || $('#canvas').hasClass('canvas-is-panning')) return; // ← 추가
             if (e.which !== 1) return;
@@ -675,6 +1071,11 @@ $(document).ready(function () {
     /** 선택된 아이템에 '사각 테두리 + 핸들' 생성 (아이콘 활성화 효과 없음) */
     /** 선택된 아이템에 '표준 뷰포트 기준 사각 테두리 + 핸들' 생성 */
     function applySelectionOverlay($item) {
+        if ($item.attr('data-type') === 'connection') {
+            applyConnectionOverlay($item);
+            return;
+        }
+
         var $svg = $item.find('svg').first();
         if ($svg.length === 0) return;
 
@@ -799,6 +1200,99 @@ $(document).ready(function () {
         */
         svgEl.appendChild(overlay);
     }
+
+    function applyConnectionOverlay($item) {
+        var $svg = $item.find('svg').first();
+        if (!$svg.length) return;
+        removeSelectionOverlay($item);
+
+        var data = $item.data('conn'); if (!data) return;
+        var overlay = document.createElementNS(SVG_NS, 'g');
+        overlay.setAttribute('class', 'selection-overlay conn-overlay');
+
+        var pts = data.points;
+        for (var i = 0; i < pts.length; i++) {
+            var p = pts[i];
+            var r = document.createElementNS(SVG_NS, 'rect');
+            var size = 8;
+            r.setAttribute('x', p.x - size / 2);
+            r.setAttribute('y', p.y - size / 2);
+            r.setAttribute('width', size);
+            r.setAttribute('height', size);
+            r.setAttribute('class', 'conn-handle');
+            r.setAttribute('data-idx', i);
+            if (i === 0) r.setAttribute('data-end', 'start');
+            else if (i === pts.length - 1) r.setAttribute('data-end', 'end');
+            overlay.appendChild(r);
+        }
+        $svg[0].appendChild(overlay);
+    }
+
+    function bindConnectionHandleDrag() {
+        var $doc = $(document);
+        var dragging = false, $conn = null, idx = -1;
+
+        $('#canvas').on('mousedown', '.conn-handle', function (e) {
+            if (e.which !== 1) return;
+            e.stopPropagation(); e.preventDefault();
+
+            $conn = $(this).closest('.connection-item');
+            if (!$conn.length) return;
+
+            // 선택 보장
+            if (!$conn.hasClass('is-selected')) { clearSelection(); $conn.addClass('is-selected'); applySelectionOverlay($conn); }
+
+            dragging = true; idx = parseInt(this.getAttribute('data-idx'), 10);
+            $('body').addClass('no-select');
+        });
+
+        $doc.on('mousemove.connHandle', function (e) {
+            if (!dragging || !$conn) return;
+            var data = $conn.data('conn'); if (!data) return;
+            var p = clientToWorld(e.clientX, e.clientY);
+            data.points[idx] = p;
+            data.poly.setAttribute('points', data.points.map(pt => pt.x + ',' + pt.y).join(' '));
+            applyConnectionOverlay($conn);
+        });
+
+        $doc.on('mouseup.connHandle', function (e) {
+            if (!dragging || !$conn) return;
+            var data = $conn.data('conn'); if (data) {
+                var endTag = (idx === 0) ? 'start' : (idx === data.points.length - 1 ? 'end' : null);
+                if (endTag) {
+                    // 드롭 위치에 아이템이 있으면 그걸로 연결, 없으면 분리
+                    var el = document.elementFromPoint(e.clientX, e.clientY);
+                    var $hit = $(el).closest('.canvas-item');
+                    var connId = $conn.data('id');
+
+                    if ($hit.length && $hit.attr('data-type') !== 'connection') {
+                        var newId = $hit.data('id');
+                        var c = getItemCenter($hit);
+                        data.points[idx] = c;
+                        if (endTag === 'start') {
+                            if (data.attachStart && data.attachStart.type === 'item')
+                                unregisterConnectionFromItem(data.attachStart.id, connId, 'start');
+                            data.attachStart = { type: 'item', id: newId };
+                            registerConnectionToItem(newId, connId, 'start');
+                        } else {
+                            if (data.attachEnd && data.attachEnd.type === 'item')
+                                unregisterConnectionFromItem(data.attachEnd.id, connId, 'end');
+                            data.attachEnd = { type: 'item', id: newId };
+                            registerConnectionToItem(newId, connId, 'end');
+                        }
+                    } else {
+                        if (endTag === 'start' && data.attachStart) { unregisterConnectionFromItem(data.attachStart.id, connId, 'start'); data.attachStart = null; }
+                        if (endTag === 'end' && data.attachEnd) { unregisterConnectionFromItem(data.attachEnd.id, connId, 'end'); data.attachEnd = null; }
+                    }
+                }
+                data.poly.setAttribute('points', data.points.map(pt => pt.x + ',' + pt.y).join(' '));
+                applyConnectionOverlay($conn);
+                if (window._minimap) window._minimap.draw();
+            }
+            dragging = false; $conn = null; idx = -1; $('body').removeClass('no-select');
+        });
+    }
+
 
     function bindCanvasPan() {
         var $win = $(window);
@@ -1126,6 +1620,466 @@ $(document).ready(function () {
         });
     }
 
+    /* === 도형 그리기 === */
+    function buildRegularPolygon(n, cx, cy, r, rotDeg) {
+        var pts = [];
+        var rot = (rotDeg || 0) * Math.PI / 180;
+        for (var i = 0; i < n; i++) {
+            var a = rot + (i * 2 * Math.PI / n);
+            pts.push((cx + r * Math.cos(a)) + ',' + (cy + r * Math.sin(a)));
+        }
+        return pts.join(' ');
+    }
+
+    function buildStar(cx, cy, rOuter, rInner, rotDeg) {
+        var pts = [];
+        var rot = (rotDeg || -90) * Math.PI / 180; // 위쪽부터 시작
+        for (var i = 0; i < 10; i++) {
+            var r = (i % 2 === 0) ? rOuter : rInner;
+            var a = rot + (i * Math.PI / 5);
+            pts.push((cx + r * Math.cos(a)) + ',' + (cy + r * Math.sin(a)));
+        }
+        return pts.join(' ');
+    }
+
+    /* 표준 뷰포트(ICON_SIZE) 기준으로 svg+g.icon-root 생성 */
+    function buildShapeSvg(shape) {
+        var pad = ICON_PAD;
+        var size = ICON_SIZE;
+        var inner = size - pad * 2;
+        var cx = size / 2, cy = size / 2;
+
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', size);
+        svg.setAttribute('height', size);
+        svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+        var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', 'icon-root');
+        svg.appendChild(g);
+
+        function style(el, strokeOnly) {
+            var st = getCurrentStyle();
+            el.setAttribute('vector-effect', 'non-scaling-stroke');
+
+            if (el.tagName.toLowerCase() === 'text') {
+                // 텍스트: fill=글자색
+                el.setAttribute('fill', st.stroke);
+                return el;
+            }
+
+            el.setAttribute('stroke', st.stroke);
+            el.setAttribute('stroke-width', isFinite(st.width) ? st.width : 2);
+            if (st.dash) el.setAttribute('stroke-dasharray', st.dash);
+            if (!strokeOnly) el.setAttribute('fill', st.fill || 'none');
+            else el.setAttribute('fill', 'none');
+            return el;
+        }
+
+        switch (shape) {
+            case 'line': {
+                var ln = style(document.createElementNS(SVG_NS, 'line'), true);
+                ln.setAttribute('x1', pad); ln.setAttribute('y1', size - pad);
+                ln.setAttribute('x2', size - pad); ln.setAttribute('y2', pad);
+                g.appendChild(ln);
+                break;
+            }
+            case 'rect': {
+                var r = style(document.createElementNS(SVG_NS, 'rect'));
+                r.setAttribute('x', pad); r.setAttribute('y', pad);
+                r.setAttribute('width', inner); r.setAttribute('height', inner);
+                g.appendChild(r);
+                break;
+            }
+            case 'ellipse': {
+                var e = style(document.createElementNS(SVG_NS, 'ellipse'));
+                e.setAttribute('cx', cx); e.setAttribute('cy', cy);
+                e.setAttribute('rx', inner / 2); e.setAttribute('ry', inner / 2);
+                g.appendChild(e);
+                break;
+            }
+            case 'triangle': {
+                var p = style(document.createElementNS(SVG_NS, 'polygon'));
+                p.setAttribute('points', buildRegularPolygon(3, cx, cy + 2, inner * 0.48, -90));
+                g.appendChild(p);
+                break;
+            }
+            case 'diamond': {
+                var p4 = style(document.createElementNS(SVG_NS, 'polygon'));
+                p4.setAttribute('points', (cx) + ',' + (pad) + ' ' + (size - pad) + ',' + (cy) + ' ' + (cx) + ',' + (size - pad) + ' ' + (pad) + ',' + (cy));
+                g.appendChild(p4);
+                break;
+            }
+            case 'poly5': {
+                var p5 = style(document.createElementNS(SVG_NS, 'polygon'));
+                p5.setAttribute('points', buildRegularPolygon(5, cx, cy, inner * 0.45, -90));
+                g.appendChild(p5);
+                break;
+            }
+            case 'poly6': {
+                var p6 = style(document.createElementNS(SVG_NS, 'polygon'));
+                p6.setAttribute('points', buildRegularPolygon(6, cx, cy, inner * 0.46, 0));
+                g.appendChild(p6);
+                break;
+            }
+            case 'star': {
+                var s = style(document.createElementNS(SVG_NS, 'polygon'));
+                s.setAttribute('points', buildStar(cx, cy, inner * 0.48, inner * 0.23, -90));
+                g.appendChild(s);
+                break;
+            }
+            case 'arrow': {
+                var path = style(document.createElementNS(SVG_NS, 'path'));
+                path.setAttribute('d', `M ${pad} ${cy} H ${cx} M ${cx - 4} ${cy - 8} L ${size - pad} ${cy} L ${cx - 4} ${cy + 8} Z`);
+                g.appendChild(path);
+                break;
+            }
+            case 'polyline': {
+                var pl = style(document.createElementNS(SVG_NS, 'polyline'));
+                pl.setAttribute('points', `${pad},${size - pad} ${cx - 6},${pad + 10} ${cx + 4},${cy + 4} ${size - pad},${pad + 6}`);
+                g.appendChild(pl);
+                break;
+            }
+            case 'text': {
+                var t = document.createElementNS(SVG_NS, 'text');
+                t.setAttribute('x', cx);
+                t.setAttribute('y', cy);
+                t.setAttribute('dominant-baseline', 'middle');
+                t.setAttribute('text-anchor', 'middle');
+                t.setAttribute('font-size', '20'); // 초기 폰트 크기 (스케일로 같이 커짐)
+                t.textContent = 'TEXT';
+                // 색/스타일은 아래 style() 로직에서 일괄 적용
+                g.appendChild(t);
+                break;
+            }
+            default: {
+                // fallback: rectangle
+                var rr = style(document.createElementNS(SVG_NS, 'rect'));
+                rr.setAttribute('x', pad); rr.setAttribute('y', pad);
+                rr.setAttribute('width', inner); rr.setAttribute('height', inner);
+                g.appendChild(rr);
+            }
+        }
+        return $(svg);
+    }
+
+    function addShapeToCanvas(shape, x, y, opts) {
+        var $canvas = $('#canvas');
+        if ($canvas.length === 0) return;
+
+        var $svg = buildShapeSvg(shape);
+        var id = 'shape_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+        var $item = $('<div>', { class: 'canvas-item', 'data-id': id });
+
+        $item.append($svg);
+        $('#world').append($item);
+
+        $item.data('scaleX', 1);
+        $item.data('scaleY', 1);
+        $item.data('rotation', 0);
+        $item.attr('data-shape', shape);
+
+        // 텍스트 초기 내용 반영
+        if (shape === 'text' && opts && typeof opts.text === 'string') {
+            var $t = $svg.find('g.icon-root > text').first();
+            if ($t.length) $t.text(opts.text);
+        }
+
+        // 아이콘과 동일하게 중앙 정렬 배치(-32 보정)
+        $item.css({ left: (x - 32) + 'px', top: (y - 32) + 'px' });
+
+        // 선택 토글
+        $('.canvas-item.is-selected').removeClass('is-selected')
+            .each(function () { removeSelectionOverlay($(this)); });
+        $item.addClass('is-selected');
+        applySelectionOverlay($item);
+
+        if (window._minimap) window._minimap.draw();
+    }
+
+    function bindDrawToolbar() {
+        var $toolbar = $('#drawToolbar');
+        var $canvas = $('#canvas');
+        if ($toolbar.length === 0) return;
+
+        // 드래그 → 드롭 직후 우발적 click 방지 플래그
+        var toolbarDrag = { active: false, suppressClick: false };
+
+        // 1) 드래그-드롭 지원
+        $toolbar.on('dragstart', '.draw-tool', function (e) {
+            var type = $(this).data('shape');
+            e.originalEvent.dataTransfer.setData('text/plain', 'shape:' + type);
+            e.originalEvent.dataTransfer.effectAllowed = 'copy';
+
+            toolbarDrag.active = true;
+            toolbarDrag.suppressClick = true; // 드롭 직후 클릭 무시
+        });
+
+        // 드래그 종료 시, 다음 클릭 1회 억제
+        $toolbar.on('dragend', '.draw-tool', function () {
+            toolbarDrag.active = false;
+            // 마이크로태스크 이후 해제 (같은 사이클의 click 방지)
+            setTimeout(function () { toolbarDrag.suppressClick = false; }, 0);
+        });
+
+        // 2) 클릭 → 캔버스 클릭 한 번으로 배치 (드래그 후 클릭 억제)
+        var drawState = { active: false, type: null };
+        function arm(type) { drawState.active = true; drawState.type = type; $canvas.addClass('draw-mode'); }
+        function disarm() { drawState.active = false; drawState.type = null; $canvas.removeClass('draw-mode'); }
+
+        $toolbar.on('click', '.draw-tool', function (e) {
+            if (toolbarDrag.suppressClick) return; // 드래그 직후 우발 클릭 무시
+            arm($(this).data('shape'));
+        });
+
+        $canvas.on('mousedown.drawPlace', function (e) {
+            if (!drawState.active) return;
+            if (e.which !== 1) return;
+            if ($canvas.hasClass('canvas-pan-ready') || $canvas.hasClass('canvas-is-panning')) return;
+
+            var target = e.currentTarget;
+            var rect = target.getBoundingClientRect();
+            var $t = $(target);
+            var z = getZoom();
+
+            var cx = e.clientX - rect.left;
+            var cy = e.clientY - rect.top;
+            var x = (cx + $t.scrollLeft()) / z;
+            var y = (cy + $t.scrollTop()) / z;
+
+            var opts = null;
+            if (drawState.type === 'text') {
+                var t = prompt('텍스트 입력', '');
+                if (t == null || t.trim() === '') { // 취소/공백이면 배치 취소
+                    disarm();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                opts = { text: t.trim() };
+            }
+            addShapeToCanvas(drawState.type, x, y, opts);
+            if (window._minimap) window._minimap.draw();
+
+            disarm();
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        // ESC로 취소
+        $(window).on('keydown.drawEscape', function (e) {
+            if (e.key === 'Escape' && drawState.active) disarm();
+        });
+    }
+
+    // 현재 UI로부터 스타일 상태 읽기
+    function getCurrentStyle() {
+        var stroke = $('#strokeColor').val() || '#111827';
+        var width = parseFloat($('#strokeWidth').val() || '2');
+        var dash = $('#dashStyle').val() || '';
+        var fill = $('#fillNone').is(':checked') ? 'none' : ($('#fillColor').val() || 'none');
+        var capStart = $('#capStart').val() || 'none';
+        var capEnd = $('#capEnd').val() || 'none';
+        return { stroke, width, dash, fill, capStart, capEnd };
+    }
+
+    function ensureMarkers($svg, color) {
+        var $defs = $svg.find('defs'); if (!$defs.length) $defs = $('<defs></defs>').appendTo($svg);
+
+        // 화살표
+        var $arrow = $svg.find('#mk-arrow');
+        if (!$arrow.length) {
+            $arrow = $(`
+      <marker id="mk-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 Z"></path>
+      </marker>
+    `).appendTo($defs);
+        }
+        $arrow.find('path').attr('fill', color);
+
+        // 점(원)
+        var $dot = $svg.find('#mk-dot');
+        if (!$dot.length) {
+            $dot = $(`
+      <marker id="mk-dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <circle cx="5" cy="5" r="3"></circle>
+      </marker>
+    `).appendTo($defs);
+        }
+        $dot.find('circle').attr('fill', color);
+    }
+
+    function applyConnectionStyle($item, style) {
+        var $svg = $item.find('svg').first();
+        var $pl = $item.find('polyline.connection-polyline').first();
+        if (!$svg.length || !$pl.length) return;
+
+        ensureMarkers($svg, style.stroke);
+
+        $pl.attr({
+            'stroke': style.stroke,
+            'stroke-width': isFinite(style.width) ? style.width : 2,
+            'fill': 'none'
+        });
+        $pl.attr('vector-effect', 'non-scaling-stroke');
+        if (style.dash) $pl.attr('stroke-dasharray', style.dash);
+        else $pl.removeAttr('stroke-dasharray');
+
+        var map = { none: null, arrow: 'url(#mk-arrow)', dot: 'url(#mk-dot)' };
+        if (style.capStart && map[style.capStart]) $pl.attr('marker-start', map[style.capStart]);
+        else $pl.removeAttr('marker-start');
+
+        if (style.capEnd && map[style.capEnd]) $pl.attr('marker-end', map[style.capEnd]);
+        else $pl.removeAttr('marker-end');
+    }
+
+
+    // 선택된 아이템들에 스타일 적용
+    function applyStyleToItem($item, style) {
+        if ($item.attr('data-type') === 'connection') {
+            applyConnectionStyle($item, style);
+            return;
+        }
+
+        var $svg = $item.find('svg').first();
+        if ($svg.length === 0) return;
+
+        var $root = $svg.find('g.icon-root');
+        if ($root.length === 0) return;
+
+        $root.children().each(function () {
+            var tag = this.tagName.toLowerCase();
+
+            if (tag === 'text') {
+                // 텍스트는 fill=글자색, stroke는 제거
+                this.setAttribute('fill', style.stroke);
+                this.removeAttribute('stroke');
+                this.removeAttribute('stroke-dasharray');
+                this.removeAttribute('stroke-width');
+                return;
+            }
+
+            // 기타 도형(선/면)
+            this.setAttribute('stroke', style.stroke);
+            this.setAttribute('stroke-width', isFinite(style.width) ? style.width : 2);
+            if (style.dash) this.setAttribute('stroke-dasharray', style.dash);
+            else this.removeAttribute('stroke-dasharray');
+
+            // 선만 있는 요소(line)는 채우기 없음
+            if (tag === 'line') {
+                this.setAttribute('fill', 'none');
+            } else {
+                this.setAttribute('fill', style.fill || 'none');
+            }
+        });
+    }
+
+    // 현재 선택 항목에 즉시 반영
+    function applyStyleToSelection() {
+        var st = getCurrentStyle();
+        $('.canvas-item.is-selected').each(function () { applyStyleToItem($(this), st); });
+    }
+
+    function bindStyleBar() {
+        // 배경색을 고르면 '없음' 자동 해제 후 즉시 적용
+        $('#fillColor').on('input change', function () {
+            if ($('#fillNone').is(':checked')) {
+                $('#fillNone').prop('checked', false);
+            }
+            applyStyleToSelection();
+        });
+
+        // 없음 체크 변화도 즉시 적용
+        $('#fillNone').on('change', function () {
+            applyStyleToSelection();
+        });
+
+        // 선색/두께/선스타일 변경 시 즉시 적용
+        $('#strokeColor, #strokeWidth, #dashStyle')
+            .on('input change', function () { applyStyleToSelection(); });
+
+        $('#capStart, #capEnd').on('change', function () { applyStyleToSelection(); });
+    }
+
+    $('#canvas').on('dblclick', '.canvas-item', function () {
+        var $item = $(this);
+        if ($item.attr('data-shape') !== 'text') return;
+        var $t = $item.find('g.icon-root > text').first();
+        if (!$t.length) return;
+        var cur = ($t.text() || '').trim();
+        var nx = prompt('텍스트 편집', cur);
+        if (nx != null) $t.text(nx.trim());
+    });
+
+    function initQuickMenu() {
+        var $canvas = $('#canvas');
+
+        // 우클릭(컨텍스트 메뉴)에서만 열기
+        $canvas.off('contextmenu.qm').on('contextmenu.qm', '.canvas-item', function (e) {
+            e.preventDefault(); // 브라우저 기본 메뉴 막기
+
+            var $it = $(this);
+            // 선택 보장
+            if (!$it.hasClass('is-selected')) {
+                $('.canvas-item.is-selected').removeClass('is-selected')
+                    .each(function () { removeSelectionOverlay($(this)); });
+                $it.addClass('is-selected');
+                applySelectionOverlay($it);
+            }
+
+            showQuickMenuAt($it, e.clientX, e.clientY); // 커서 위치에 표시
+        });
+
+        // 닫기 조건들 (그대로 유지)
+        $canvas.on('mousedown.qm', function (e) {
+            if ($(e.target).closest('.canvas-item, #quickMenu').length === 0) hideQuickMenu();
+        });
+        $canvas.on('scroll.qm', hideQuickMenu);
+        $(window).on('keydown.qm', function (e) { if (e.key === 'Escape') hideQuickMenu(); });
+        $(window).on('resize.qm', hideQuickMenu);
+
+        // 메뉴 항목 클릭 시(동작은 추후 연결), 일단 닫기만
+        $('#quickMenu').off('click.qm').on('click.qm', '.qm-item', function () {
+            var cmd = $(this).data('cmd');
+            var $anchor = _qm.anchor;
+            hideQuickMenu();
+
+            if (cmd === 'link' && $anchor && $anchor.length && $anchor.attr('data-type') !== 'connection') {
+                startConnect($anchor);
+                return;
+            }
+            // TODO: settings/copy/paste/delete 등은 추후
+        });
+    }
+
+    function showQuickMenuAt($item, clientX, clientY) {
+        var $m = $('#quickMenu');
+        var cont = $('.panel-bottom')[0];
+        if (!$m.length || !cont) return;
+
+        _qm.anchor = $item; // 현재 대상 보관
+
+        // 패널 기준 좌표로 변환
+        var cr = cont.getBoundingClientRect();
+        var x = clientX - cr.left;
+        var y = clientY - cr.top;
+
+        // 일단 보이게 한 뒤 크기 확인
+        $m.css({ left: x, top: y }).attr('aria-hidden', 'false');
+
+        var mw = $m.outerWidth();
+        var mh = $m.outerHeight();
+        var cw = cr.width;
+        var ch = cr.height;
+
+        // 경계 보정(우/하단 넘침 방지)
+        if (x + mw > cw - 8) x = Math.max(8, cw - mw - 8);
+        if (y + mh > ch - 8) y = Math.max(8, ch - mh - 8);
+
+        $m.css({ left: x, top: y });
+    }
+
 
     /** 앱 초기화(명시적 함수명) */
     function appInit() {
@@ -1145,6 +2099,11 @@ $(document).ready(function () {
         initMinimap();
         bindMinimapToggle();
         bindZoom();
+        bindDrawToolbar();
+        bindStyleBar();
+        initQuickMenu();
+        bindConnectMode();
+        bindConnectionHandleDrag();
     }
     appInit();
 });

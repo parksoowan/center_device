@@ -36,6 +36,87 @@
                     <div id="menuGrid" class="menu-grid">
                         <!-- main.js에서 menu01.svg ~ menu10.svg 자동 삽입 -->
                     </div>
+                    <!-- 항상 보이는 그리기 툴바 -->
+                    <!-- 항상 보이는 그리기 툴바 -->
+                    <div id="drawToolbar" class="draw-toolbar" aria-label="그리기 도구">
+                        <!-- 직선 -->
+                        <button class="draw-tool" data-shape="line" title="직선" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2" />
+                            </svg>
+                            <span class="label">직선</span>
+                        </button>
+
+                        <!-- 사각형 -->
+                        <button class="draw-tool" data-shape="rect" title="사각형" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="4" y="4" width="16" height="16" stroke="currentColor" fill="none"
+                                    stroke-width="2" />
+                            </svg>
+                            <span class="label">사각</span>
+                        </button>
+
+                        <!-- 원/타원 -->
+                        <button class="draw-tool" data-shape="ellipse" title="원/타원" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <ellipse cx="12" cy="12" rx="8" ry="8" stroke="currentColor" fill="none"
+                                    stroke-width="2" />
+                            </svg>
+                            <span class="label">원/타원</span>
+                        </button>
+
+                        <!-- 삼각형 -->
+                        <button class="draw-tool" data-shape="triangle" title="삼각형" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="12,4 20,20 4,20" stroke="currentColor" fill="none" stroke-width="2" />
+                            </svg>
+                            <span class="label">삼각</span>
+                        </button>
+
+                        <!-- 다이아(마름모) -->
+                        <button class="draw-tool" data-shape="diamond" title="다이아몬드" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="12,3 21,12 12,21 3,12" stroke="currentColor" fill="none"
+                                    stroke-width="2" />
+                            </svg>
+                            <span class="label">다이아</span>
+                        </button>
+
+                        <!-- 오각형 -->
+                        <button class="draw-tool" data-shape="poly5" title="오각형" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="12,3 21,10 17,21 7,21 3,10" stroke="currentColor" fill="none"
+                                    stroke-width="2" />
+                            </svg>
+                            <span class="label">오각</span>
+                        </button>
+
+                        <!-- 육각형 -->
+                        <button class="draw-tool" data-shape="poly6" title="육각형" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="7,4 17,4 22,12 17,20 7,20 2,12" stroke="currentColor" fill="none"
+                                    stroke-width="2" />
+                            </svg>
+                            <span class="label">육각</span>
+                        </button>
+
+                        <!-- 별 -->
+                        <button class="draw-tool" data-shape="star" title="별" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <polygon points="12,3 14.8,9 21.2,9 16,13 18,20 12,16 6,20 8,13 2.8,9 9.2,9"
+                                    stroke="currentColor" fill="none" stroke-width="2" />
+                            </svg>
+                            <span class="label">별</span>
+                        </button>
+                        <!-- 텍스트 -->
+                        <button class="draw-tool" data-shape="text" title="텍스트" draggable="true">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 6h14M12 6v12" stroke="currentColor" fill="none" stroke-width="2" />
+                            </svg>
+                            <span class="label">텍스트</span>
+                        </button>
+
+                    </div>
                 </aside>
 
                 <!-- 오른쪽: 실제 작업/콘텐츠 영역 -->
@@ -68,12 +149,54 @@
 
                                 <label class="ctrl-check"><input type="checkbox" id="minimapToggle" checked> 미니맵</label>
                                 <div class="zoom-group" aria-label="줌 컨트롤">
-                                <button type="button" id="zoomOutBtn" class="zoom-btn" title="축소">축소</button>
-                                <span id="zoomLabel" class="zoom-label">100%</span>
-                                <button type="button" id="zoomInBtn" class="zoom-btn" title="확대">확대</button>
-                                <button type="button" id="zoomFitBtn" class="zoom-btn" title="맞춤">맞춤</button>
+                                    <button type="button" id="zoomOutBtn" class="zoom-btn" title="축소">축소</button>
+                                    <span id="zoomLabel" class="zoom-label">100%</span>
+                                    <button type="button" id="zoomInBtn" class="zoom-btn" title="확대">확대</button>
+                                    <button type="button" id="zoomFitBtn" class="zoom-btn" title="맞춤">맞춤</button>
+                                </div>
+                                <!-- 스타일 바 -->
+                                <div class="stylebar" aria-label="스타일 설정">
+                                    <label class="style-item">선색
+                                        <input type="color" id="strokeColor" value="#111827">
+                                    </label>
+
+                                    <label class="style-item">두께
+                                        <input type="number" id="strokeWidth" min="0" step="0.5" value="2"
+                                            style="width:64px">
+                                    </label>
+
+                                    <label class="style-item">선스타일
+                                        <select id="dashStyle">
+                                            <option value="">실선</option>
+                                            <option value="6,6">점선</option>
+                                            <option value="10,5,2,5">일점쇄선</option>
+                                            <option value="10,4,2,4,2,4">2점쇄선</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="style-item">배경
+                                        <input type="color" id="fillColor" value="#ffffff">
+                                        <span class="style-sub">
+                                            <input type="checkbox" id="fillNone" checked> 없음
+                                        </span>
+                                    </label>
+
+                                    <!-- 양끝 모양 -->
+                                    <label class="style-item">
+                                        끝모양
+                                        <select id="capStart" title="시작쪽">
+                                            <option value="none" selected>시작: 없음</option>
+                                            <option value="arrow">시작: 화살</option>
+                                            <option value="dot">시작: 점</option>
+                                        </select>
+                                        <select id="capEnd" title="끝쪽">
+                                            <option value="none" selected>끝: 없음</option>
+                                            <option value="arrow">끝: 화살</option>
+                                            <option value="dot">끝: 점</option>
+                                        </select>
+                                    </label>
+                                </div>
                             </div>
-                            </div>                          
 
                             <!-- 우측 끝: + 아이콘 버튼 (동작은 추후 구현) -->
                             <button id="addLayerBtn" class="icon-btn" type="button" aria-label="레이어 추가" title="레이어 추가">
@@ -83,7 +206,7 @@
                                 </svg>
                             </button>
 
-                            
+
                         </div>
 
                         <!-- 여기(패널 하단)만 교체합니다 -->
@@ -99,6 +222,17 @@
                             <div id="miniWrap" class="minimap">
                                 <canvas id="miniCanvas" width="220" height="160"></canvas>
                             </div>
+
+                            <!-- 퀵메뉴: 처음엔 숨김 -->
+                            <div id="quickMenu" class="quickmenu" role="menu" aria-hidden="true">
+                                <button class="qm-item" data-cmd="settings" type="button">기본설정</button>
+                                <button class="qm-item" data-cmd="copy" type="button">복사</button>
+                                <button class="qm-item" data-cmd="paste" type="button" disabled>붙여넣기</button>
+                                <button class="qm-item" data-cmd="delete" type="button">삭제</button>
+                                <div class="qm-sep" role="separator"></div>
+                                <button class="qm-item" data-cmd="link" type="button">연결</button>
+                            </div>
+
                         </div>
                     </div>
                 </section>

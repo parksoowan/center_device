@@ -83,11 +83,13 @@ body {
 
 /* 왼쪽 메뉴 패널: 2열 아이콘 그리드 + 스크롤 + 배경으로 영역 구분 */
 .menu-panel {
-  width: calc((64px * 2) + 12px + 32px); /* 기존 대비 +32px 여유 */
+  width: calc((64px * 2) + 12px + 32px);
   padding: 8px;
-  overflow-y: auto;
   border-right: 1px solid #e5e7eb;
   background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* ← 스크롤은 그리드에만 */
 }
 
 .menu-grid {
@@ -95,9 +97,11 @@ body {
   grid-template-columns: repeat(2, 64px);
   grid-auto-rows: 64px;
   gap: 12px;
-  padding: 0;                     /* ← 좌측 패딩 제거 (우측 쏠림 원인) */
-  justify-content: center;        /* 그리드 전체를 수평 중앙 정렬 */
-  justify-items: center;          /* 각 셀의 콘텐츠를 수평 중앙 정렬 */
+  padding: 0;
+  justify-content: center;
+  justify-items: center;
+  flex: 1 1 auto;       /* 가변 높이 */
+  overflow-y: auto;     /* ← 스크롤 이쪽 */
 }
 
 .menu-grid img {
@@ -270,16 +274,25 @@ body {
 /* 캔버스 위에 올라가는 아이템 컨테이너 */
 .canvas-item {
   position: absolute;
-  transform-origin: center center;
-  cursor: grab;           /* 드래그 가능 힌트 */
-  user-select: none;
+  left: 0; top: 0;
+  width: 0; height: 0;
+  overflow: visible;        /* 내부 SVG가 바깥으로 보이도록 */
 }
 
 /* 아이콘(svg) 기본 크기 — 드롭 시 초기값 */
-.canvas-item svg {
+.canvas-item:not(.connection-item) > svg {
   width: 64px;
   height: 64px;
   display: block;
+}
+
+.connection-item > svg {
+  position: absolute;
+  left: 0; top: 0;
+  width: 4000px;   /* WORLD_W */
+  height: 3000px;  /* WORLD_H */
+  display: block;
+  pointer-events: none;  
 }
 
 /* 선택 시 아이콘 모양 윤곽선 표시 */
@@ -501,3 +514,158 @@ body.no-select, body.no-select * { user-select: none !important; }
 .zoom-btn:active { transform: translateY(1px); }
 .zoom-label { min-width: 54px; text-align: center; font-size: 14px; color: #374151; }
 
+/* === 그리기 툴바 === */
+.draw-toolbar{
+  position: sticky;
+  bottom: 0;
+  width: 100%;                       /* 패널 폭에 맞춤 */
+  display: grid;
+  grid-template-columns: repeat(2, 64px);  /* ← 메뉴 그리드와 동일하게 2열 */
+  grid-auto-rows: 80px;               /* 라벨 포함 높이 */
+  gap: 12px;
+  padding: 10px;
+  margin-top: 8px;
+  background: #ffffff;                /* 툴을 감싸는 배경 */
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  justify-content: center;            /* 내부 격자 수평 중앙 */
+  justify-items: center;              /* 각 칸 콘텐츠 중앙 */
+  z-index: 1;
+}
+.draw-tool{
+  width: 64px;
+  height: 80px;                       /* 아이콘 + 라벨 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: grab;
+  text-align: center;
+}
+.draw-tool:active{ cursor: grabbing; }
+.draw-tool svg{ 
+  width: 22px;
+  height: 22px;
+  display: block; 
+}
+
+.draw-tool .label{
+  font-size: 11px;
+  line-height: 1.1;
+  color: #374151;
+  user-select: none;
+}
+
+#canvas.draw-mode { cursor: crosshair; }
+
+/* === 스타일 바 === */
+.stylebar { display: inline-flex; align-items: center; gap: 10px; margin-left: 8px; flex-wrap: wrap; }
+.style-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color:#374151; }
+.style-sub { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#6b7280; }
+.stylebar input[type="color"]{ width:32px; height:24px; padding:0; border:1px solid #d1d5db; border-radius:6px; background:#fff; }
+.stylebar select, .stylebar input[type="number"]{
+  height: 32px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; font-size: 13px;
+}
+.stylebar select:focus, .stylebar input[type="number"]:focus{
+  outline:none; border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.15);
+}
+
+/* === Quick Menu === */
+.quickmenu{
+  position:absolute;
+  left:-9999px; top:-9999px;
+  min-width:140px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+  padding:6px;
+  z-index:20;   /* 미니맵(10)보다 위 */
+}
+.quickmenu[aria-hidden="true"]{ display:none; }
+
+.qm-item{
+  width:100%;
+  display:flex; align-items:center; justify-content:flex-start;
+  gap:8px;
+  padding:8px 10px;
+  background:transparent;
+  border:0; border-radius:8px;
+  font-size:13px; color:#111827; text-align:left;
+  cursor:pointer;
+}
+.qm-item:hover{ background:#f3f4f6; }
+.qm-item:disabled{ color:#9ca3af; cursor:not-allowed; }
+.qm-sep{
+  height:1px; margin:6px 4px;
+  background:#e5e7eb;
+}
+
+/* === Connection (Polyline) === */
+.connection-item .connection-polyline {
+  pointer-events: stroke; /* 얇아도 클릭 잘 되게 */
+  stroke: #0ea5e9;
+  stroke-width: 2;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.conn-overlay .conn-handle{
+  pointer-events: all;
+  fill:#fff;
+  stroke:#0ea5e9;
+  stroke-width:2;
+  vector-effect:non-scaling-stroke;
+  cursor:pointer;
+}
+
+.conn-overlay .conn-handle[data-end="start"],
+.conn-overlay .conn-handle[data-end="end"]{
+  cursor:move;
+}
+
+/* 연결 모드일 때 커서 */
+#canvas.connect-mode{ cursor: crosshair; }
+
+/* 연결 프리뷰는 클릭(포인터 이벤트) 아예 비활성화 */
+.connection-item.preview { pointer-events: none; }
+.connection-item.preview * { pointer-events: none; }
+
+
+#canvas.connect-mode,
+#canvas.connect-mode * {
+  cursor: crosshair !important;
+}
+
+/* 연결 모드: 선택 오버레이/핸들은 히트 금지 (클릭을 연결 로직에 양보) */
+#canvas.connect-mode .selection-overlay,
+#canvas.connect-mode .selection-overlay * {
+  pointer-events: none !important;
+}
+
+/* 컨테이너는 배경 히트를 만들지 않도록 0×0 + overflow:visible (위에서 설정) */
+.connection-item { pointer-events: auto; }         /* 컨테이너 자체를 클릭 투명화 */
+.connection-item > svg { pointer-events: none; }   /* 자식(SVG)은 정상 타겟 */
+/* 실제 선(Polyline)만 클릭 가능 */
+.connection-item > svg .connection-polyline {
+    pointer-events: stroke;
+}
+/* 핸들은 클릭 및 드래그 가능 */
+.conn-overlay .conn-handle {
+    pointer-events: all;
+}
+
+/* 스택 순서: 아이템(아이콘/도형) > 연결(선) > 프리뷰 */
+.canvas-item { z-index: 10; }
+.connection-item { z-index: 1; }
+.connection-item.preview { z-index: 0; }
+
+/* (선택한 연결만 핸들이 위로 올라오게 하고 싶다면 옵션) */
+.connection-item.is-selected { z-index: 5; } /* 아이템(10)보단 낮게 유지 */
+
+/* .connection-item > svg { pointer-events: none; } */
