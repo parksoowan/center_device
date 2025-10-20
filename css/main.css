@@ -304,7 +304,7 @@ body {
 .canvas-item .selection-handle {
   fill: #ffffff;
   stroke: #0ea5e9;
-  stroke-width: 2;
+  /* stroke-width: 2; */
   vector-effect: non-scaling-stroke;
 }
 
@@ -320,7 +320,7 @@ body {
 .selection-overlay .selection-rect {
   fill: none;
   stroke: #0ea5e9;
-  stroke-width: 2;
+  /* stroke-width: 2; */
   vector-effect: non-scaling-stroke;
   opacity: 0.95;
   pointer-events: none;   /* 내부는 이동용: 이벤트 통과 */
@@ -438,6 +438,7 @@ body.no-select, body.no-select * { user-select: none !important; }
 .selection-overlay .selection-rect { pointer-events: none; }
 
 /* 회전 핸들 연결선(보이기만, 클릭 X) */
+/*
 .selection-rotate-line {
   stroke: #0ea5e9;
   stroke-width: 2;
@@ -445,12 +446,16 @@ body.no-select, body.no-select * { user-select: none !important; }
   pointer-events: none;
   opacity: 0.9;
 }
+*/
+.selection-rotate-line {
+   display: none !important;
+}
 
 /* 회전 핸들(원) */
 .selection-rotate-handle {
   fill: #ffffff;
   stroke: #0ea5e9;
-  stroke-width: 2;
+  /* stroke-width: 2; */
   vector-effect: non-scaling-stroke;
   cursor: grab;
   pointer-events: all;
@@ -619,7 +624,7 @@ body.no-select, body.no-select * { user-select: none !important; }
   pointer-events: all;
   fill:#fff;
   stroke:#0ea5e9;
-  stroke-width:2;
+  /* stroke-width:2; */
   vector-effect:non-scaling-stroke;
   cursor:pointer;
 }
@@ -669,3 +674,5 @@ body.no-select, body.no-select * { user-select: none !important; }
 .connection-item.is-selected { z-index: 5; } /* 아이템(10)보단 낮게 유지 */
 
 /* .connection-item > svg { pointer-events: none; } */
+
+.canvas-item.is-resizing .selection-overlay { display: none !important; }
